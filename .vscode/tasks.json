@@ -1,0 +1,27 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "cppbuild",
+			"label": "C/C++: riscv32-esp-elf-gcc.exe build active file",
+			"command": "C:/Users/MDL0104/.platformio/packages/toolchain-riscv32-esp/bin/riscv32-esp-elf-gcc.exe",
+			"args": [
+				"-fdiagnostics-color=always",
+				"-g",
+				"${file}",
+				"-o",
+				"${fileDirname}\\${fileBasenameNoExtension}.exe",
+				"-march=rv32imc",
+				""
+			],
+			"options": {
+				"cwd": "C:/Users/MDL0104/.platformio/packages/toolchain-riscv32-esp/bin"
+			},
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": "build",
+			"detail": "compiler: C:/Users/MDL0104/.platformio/packages/toolchain-riscv32-esp/bin/riscv32-esp-elf-gcc.exe"
+		}
+	]
+}
