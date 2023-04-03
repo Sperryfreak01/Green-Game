@@ -7,31 +7,8 @@
 #define ARDUINOJSON_USE_LONG_LONG 1
 
 #include <GreenGame.h>
-#include <secrets.h>
-#include <HTTPClient.h>
-#include <Update.h>
-#include "EspMQTTClient.h"
-#include <ArduinoJson.h>
-#include "esp_system.h"
-
 
 void IRAM_ATTR touchEvent(void);
-void display(struct LEDstruct);
-void sendJSON(const JsonDocument&);
-//===================================== Object Def ============================================
-
-HTTPClient OTAclient;
-
-EspMQTTClient client(
-  WIFI_SSID, // TODO #1 Change to allow user to set wifi password
-  WIFI_PASSWORD,
-  "mattlovett.com",  // MQTT Broker server ip
-  MQTT_USER,   // Can be omitted if not needed
-  MQTT_PASSWORD,   // Can be omitted if not needed
-  "greengame3",     // Client name that uniquely identify your device  #TODO #2 make MQTT login client name dynamic somehow
-  1883              // The MQTT port, default to 1883. this line can be omitted
-);
-//=================================== End Object Def ==========================================
 
 //===================================== Structure Def ============================================
 
@@ -62,23 +39,9 @@ struct Event {
 int totalLength;       //total size of firmware
 int currentLength = 0; //current size of written firmware
 
-//Time related variables
-unsigned long startMillis;  
-unsigned long currentMillis;
-unsigned long eventTime;
-unsigned long syncTime;
-unsigned long deltaTime;
-
 Button touchBtn;
 LEDstruct colors;
 Event event;
-
-//Device ID stuff
-uint32_t macLow;
-uint32_t macHigh; 
-uint64_t fullMAC;
-String deviceID = "unknown";
-String deviceChan = String("greengame/events/" + deviceID);
 
 //=================================== End Variable Def ==========================================
 
@@ -96,26 +59,48 @@ void setup()
   pinMode(whiteLEDs, OUTPUT);
   digitalWrite(whiteLEDs, LOW);
 
-  //Configure the interupt for the cap touch sensor
-  pinMode(D4, INPUT);
-  attachInterrupt(digitalPinToInterrupt(D4), touchEvent, RISING);
-
+   Serial.begin(115200);
+  delay(5000);
   //Retrieve and build the MAC strign so we can use it later as a MQTT device identifier
   macLow  = ESP.getEfuseMac() & 0xFFFFFFFF; 
   macHigh = ( ESP.getEfuseMac() >> 32 ) % 0xFFFFFFFF;
   fullMAC = ESP.getEfuseMac();
-  deviceID = String(macLow) + String(macHigh);
-  String deviceChan = String("greengame/events/" + deviceID); //MQTT channel for this specific device, used to post status msgs, logs, targeted OTAs, etc.
-  Serial.printf("Full: %llu \n",fullMAC);
+  strcpy(deviceID, String(String(macLow) + String(macHigh)).c_str());
 
-  Serial.begin(115200);
+
+  Serial.println("mqttuser: ");
+  strcpy (mqttuser,"");
+  strcat (mqttuser, "green");
+  strcat (mqttuser, String(macLow).c_str());
+
+  //String mqttuserstring = String("green" + String(macLow));
+  //mqttuser = mqttuserstring.c_str();
+  
+  String tmpdeviceChannel = String("greengame/device/" + String(macLow) + String(macHigh)); //MQTT channel for this specific device, used to post status msgs, logs, targeted OTAs, etc.
+  //deviceChannel = tmpdeviceChannel.c_str();
+  strcpy (deviceChannel,tmpdeviceChannel.c_str());
+ 
+ 
+  client = new EspMQTTClient(
+    SSID, // TODO #1 Change to allow user to set wifi password
+    WIFIPASS,
+    BROKER,  // MQTT Broker server ip
+    MQTTu,   // Can be omitted if not needed
+    MQTTp,   // Can be omitted if not needed
+    mqttuser,     // Client name that uniquely identify your device  #TODO #2 make MQTT login client name dynamic somehow
+    1883              // The MQTT port, default to 1883. this line can be omitted
+    );
 
   // Optional functionalities of EspMQTTClient
-  client.enableDebuggingMessages(); // Enable debugging messages sent to serial output
-  client.enableHTTPWebUpdater(); // Enable the web updater. User and password default to values of MQTTUsername and MQTTPassword. These can be overridden with enableHTTPWebUpdater("user", "password").
-  client.enableOTA(); // Enable OTA (Over The Air) updates. Password defaults to MQTTPassword. Port is the default OTA port. Can be overridden with enableOTA("password", port).
-  client.enableLastWillMessage("TestClient/lastwill", "Disconnected");  // You can activate the retain flag by setting the third parameter to true
+  client->enableDebuggingMessages(); // Enable debugging messages sent to serial output
+  client->enableHTTPWebUpdater(); // Enable the web updater. User and password default to values of MQTTUsername and MQTTPassword. These can be overridden with enableHTTPWebUpdater("user", "password").
+  client->enableOTA(); // Enable OTA (Over The Air) updates. Password defaults to MQTTPassword. Port is the default OTA port. Can be overridden with enableOTA("password", port).
+  client->enableLastWillMessage(deviceChannel, "Disconnected");  // You can activate the retain flag by setting the third parameter to true
   
+  //Configure the interupt for the cap touch sensor
+  pinMode(D4, INPUT);
+  attachInterrupt(digitalPinToInterrupt(D4), touchEvent, RISING);
+
   //Zero out the system time, we will use this time to compute who the winner is on a MQTT touch event
   syncTime=millis();
   startMillis = millis();  //initial start time
@@ -124,84 +109,107 @@ void setup()
 
 void loop()
 {
-  client.loop(); //Wifi keep alive
+  client->loop(); //Wifi keep alive
+  display(colors); //TODO putting this here so we can have a progressive fade/refresh in the future
 
-  if (touchBtn.pressed) {
+  if (client->isMqttConnected()){
+    if (touchBtn.pressed) {
+      deltaTime = touchBtn.touchTime - syncTime;
+      if (deltaTime >= debouceTime){
+        String log = String("touch Event at delta of: " + String(touchBtn.delta));
+        Serial.println(log);
+        client->publish(deviceChannel, log);
+
+        colors.redBrightness = 0;
+        colors.blueBrightness = 0;
+        colors.greenBrightness = 255;
+        colors.whiteBrightness = 0;
+        display(colors);
         
-    deltaTime = touchBtn.touchTime - syncTime;
-		Serial.printf("touch Event at delta of %lu ms \n", touchBtn.delta);
-    client.publish("greengame/events/", "touch Event at delta of %lu ms \n", touchBtn.delta);
+        // Publish a message 
+        StaticJsonDocument<200> jsonTxBuffer;
+        jsonTxBuffer["event"] = "touch";
+        jsonTxBuffer["device"] = fullMAC; 
+        jsonTxBuffer["delta"] = touchBtn.delta;
+        sendJSON(jsonTxBuffer); 
+      }
 
-    colors.redBrightness = 0;
+      touchBtn.pressed = false;
+    }
+
+    if (event.newEvent) {
+      //deltaTime = event.eventTime - syncTime;
+
+      Serial.println(touchBtn.touchTime - syncTime);
+      if (event.eventTime < (touchBtn.touchTime - syncTime)){
+        String log = String("they win\n Event occured at: " + String(event.eventTime) + "\n Last touch Event at: " + String(touchBtn.delta));
+        /*
+        Serial.println("they win");
+        Serial.print("the event occured at: ");
+        Serial.println(event.eventTime);
+        Serial.printf("last touch Event at %lu \n", touchBtn.delta);
+        */
+        Serial.println(log);
+        client->publish(deviceChannel, log);
+        
+        //the event happened sooner than our last touch event, filters out delayed messages?? thats what I am telling myself.
+        //set the color to red and sync the time
+        colors.redBrightness = 0;
+        colors.blueBrightness = 0;
+        colors.greenBrightness = 0;
+        colors.whiteBrightness = 255;
+
+        StaticJsonDocument<200> jsonTxBuffer;
+        jsonTxBuffer["event"] = "sync";
+        jsonTxBuffer["device"] = fullMAC; 
+        sendJSON(jsonTxBuffer);
+      }
+      else if (event.eventTime >= (touchBtn.touchTime - syncTime)){
+        String log = String("they lose\n Event occured at: " + String(event.eventTime) + "\n Last touch Event at: " + String(touchBtn.delta));
+        /*
+        Serial.println("they lose");
+        Serial.print("the event occured at: ");
+        Serial.println(event.eventTime);
+        Serial.print("the last touch occured at: ");
+        */
+        Serial.println(log);
+        client->publish(deviceChannel, log);
+
+        //the event happened later than our last touch event, filters out delayed messages?? thats what I am telling myself.
+        //set the color to red and sync the time
+        colors.redBrightness = 128; //just so I can debug a losers message coming in
+
+        StaticJsonDocument<200> jsonTxBuffer;
+        jsonTxBuffer["event"] = "sync";
+        jsonTxBuffer["device"] = fullMAC; 
+        sendJSON(jsonTxBuffer);
+      }
+
+      display(colors);
+      event.newEvent = false;    
+    }
+  }
+  else {
+    //Show red anytime the MQTT connection has died
+    colors.redBrightness = 255;
     colors.blueBrightness = 0;
-    colors.greenBrightness = 255;
+    colors.greenBrightness = 0;
     colors.whiteBrightness = 0;
-
-    display(colors);
-    
-    // Publish a message 
-    StaticJsonDocument<200> jsonTxBuffer;
-    jsonTxBuffer["event"] = "touch";
-    jsonTxBuffer["device"] = fullMAC; 
-    jsonTxBuffer["delta"] = touchBtn.delta;
-    sendJSON(jsonTxBuffer); 
-
-    touchBtn.pressed = false;
-	}
-
-  if (event.newEvent) {
-    //deltaTime = event.eventTime - syncTime;
-
-    Serial.println(touchBtn.touchTime - syncTime);
-    if (event.eventTime < (touchBtn.touchTime - syncTime)){
-      Serial.println("they win");
-      Serial.print("the event occured at: ");
-      Serial.println(event.eventTime);
-      Serial.printf("last touch Event at %lu \n", touchBtn.delta);
-      //the event happened sooner than our last touch event, filters out delayed messages?? thats what I am telling myself.
-      //set the color to red and sync the time
-      colors.redBrightness = 0;
-      colors.blueBrightness = 0;
-      colors.greenBrightness = 0;
-      colors.whiteBrightness = 255;
-
-      StaticJsonDocument<200> jsonTxBuffer;
-      jsonTxBuffer["event"] = "sync";
-      jsonTxBuffer["device"] = fullMAC; 
-      sendJSON(jsonTxBuffer);
-    }
-    else if (event.eventTime >= (touchBtn.touchTime - syncTime)){
-      Serial.println("they lose");
-      Serial.print("the event occured at: ");
-      Serial.println(event.eventTime);
-      Serial.print("the last touch occured at: ");
-      //the event happened later than our last touch event, filters out delayed messages?? thats what I am telling myself.
-      //set the color to red and sync the time
-      colors.redBrightness = 128; //just so I can debug a losers message coming in
-
-      StaticJsonDocument<200> jsonTxBuffer;
-      jsonTxBuffer["event"] = "sync";
-      jsonTxBuffer["device"] = fullMAC; 
-      sendJSON(jsonTxBuffer);
-    }
-
-    display(colors);
-    event.newEvent = false;    
   }
 }
-
 
 
 void IRAM_ATTR touchEvent(){
   touchBtn.touchTime = millis();
   touchBtn.delta = touchBtn.touchTime - syncTime;
-  //TODO add some kind of touch backoff to stop people from slapping it over and over again, or fluttering events 
   touchBtn.pressed = true;
 }
+
 
 void synchronize(){
   syncTime = millis();
 }
+
 
 void recieveEvents(const String& msg){
   /*even types:
@@ -257,7 +265,6 @@ void display(struct LEDstruct led) {
 }
 
 
-
 void updateFirmware(uint8_t *data, size_t len){
   // Function to update firmware incrementally
   // Buffer is declared to be 128 so chunks of 128 bytes
@@ -279,30 +286,29 @@ void updateFirmware(uint8_t *data, size_t len){
 void sendJSON(const JsonDocument& json){
     char msg[128];
     int b =serializeJson(json, msg);
-    Serial.println("message length = ");
-    Serial.print(b,DEC);
-    client.publish("greengame/events/", msg); // You can activate the retain flag by setting the third parameter to true  
+    Serial.print("message length = ");
+    Serial.println(b,DEC);
+    client->publish("greengame/events/", msg); // You can activate the retain flag by setting the third parameter to true  
 }
-
-
-
-
-
 
 
 void onConnectionEstablished(){
   // This function is called once everything is connected (Wifi and MQTT), is used to register callbacks for MQTT messages recieved
   // Subscribe to "mytopic/test" and display received message to Serial
-  client.subscribe("greengame/events/", recieveEvents);
+  client->subscribe("greengame/events/", recieveEvents);
+  client->subscribe(String("greengame/OTA/" + String(deviceID)), fetchOTA);
 
   // Publish a message to "mytopic/test"
+  client->publish(deviceChannel, "Connected"); // You can activate the retain flag by setting the third parameter to true
   
-  client.publish(deviceChan, "Connected"); // You can activate the retain flag by setting the third parameter to true
-
+  colors.redBrightness = 0;
+  colors.blueBrightness = 255;
+  colors.greenBrightness = 0;
+  colors.whiteBrightness = 0;
 }
 
 
-bool fetchOTA(char* HOST) {
+bool fetchOTA(const String& HOST) {
   bool status;
   // Connect to external web server
   OTAclient.begin(HOST);
@@ -347,3 +353,5 @@ bool fetchOTA(char* HOST) {
   OTAclient.end();
   return status;
 }
+
+
