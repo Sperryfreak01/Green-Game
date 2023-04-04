@@ -48,7 +48,11 @@ char MQTTp[] = MQTT_PASSWORD;
 char mqttuser[] = "green01234567"; 
 char deviceID[17];
 char deviceChannel[40];    
+char FW_Version[] = "0.1";
+char HW_Version[]  = "1";
+
 
 void display(struct LEDstruct);
-void sendJSON(const JsonDocument&);
+void sendJSON(const JsonDocument&, const char*);
 bool fetchOTA(const String& HOST);
+String getMacAddress();

@@ -1,9 +1,3 @@
-/*
-  SimpleMQTTClient.ino
-  The purpose of this exemple is to illustrate a simple handling of MQTT and Wifi connection.
-  Once it connects successfully to a Wifi network and a MQTT broker, it subscribe to a topic and send a message to it.
-  It will also send a message delayed 5 seconds later.
-*/
 #define ARDUINOJSON_USE_LONG_LONG 1
 
 #include <GreenGame.h>
@@ -48,38 +42,39 @@ Event event;
 void setup()
 { //setup all the LED control pin
   pinMode(redLEDs, OUTPUT);
-  digitalWrite(redLEDs, LOW);
+  digitalWrite(D0, LOW);
 
   pinMode(blueLEDs, OUTPUT);
-  digitalWrite(blueLEDs, LOW);
+  digitalWrite(D1, LOW);
 
   pinMode(greenLEDs, OUTPUT);
-  digitalWrite(greenLEDs, LOW);
+  digitalWrite(D2, LOW);
 
   pinMode(whiteLEDs, OUTPUT);
-  digitalWrite(whiteLEDs, LOW);
+  digitalWrite(D3, LOW);
+  
 
-   Serial.begin(115200);
-  delay(5000);
+  Serial.begin(115200);
+  //delay(5000); //delay to get the serial port reconnected before loggin stuff
+  
   //Retrieve and build the MAC strign so we can use it later as a MQTT device identifier
-  macLow  = ESP.getEfuseMac() & 0xFFFFFFFF; 
-  macHigh = ( ESP.getEfuseMac() >> 32 ) % 0xFFFFFFFF;
-  fullMAC = ESP.getEfuseMac();
-  strcpy(deviceID, String(String(macLow) + String(macHigh)).c_str());
+  String tmpMAC = getMacAddress();
+  strcpy(deviceID, tmpMAC.c_str());
 
-
-  Serial.println("mqttuser: ");
+  //TODO eventually pull in the user from the captive portal configuration
   strcpy (mqttuser,"");
   strcat (mqttuser, "green");
-  strcat (mqttuser, String(macLow).c_str());
-
-  //String mqttuserstring = String("green" + String(macLow));
-  //mqttuser = mqttuserstring.c_str();
+  strcat (mqttuser, deviceID);
   
-  String tmpdeviceChannel = String("greengame/device/" + String(macLow) + String(macHigh)); //MQTT channel for this specific device, used to post status msgs, logs, targeted OTAs, etc.
-  //deviceChannel = tmpdeviceChannel.c_str();
+  String tmpdeviceChannel = String("greengame/device/" + tmpMAC); //MQTT channel for this specific device, used to post status msgs, logs, targeted OTAs, etc.
   strcpy (deviceChannel,tmpdeviceChannel.c_str());
  
+  //set the color to red because we are disconnected
+  colors.redBrightness = 255;
+  colors.blueBrightness = 0;
+  colors.greenBrightness = 0;
+  colors.whiteBrightness = 0;
+  display(colors);
  
   client = new EspMQTTClient(
     SSID, // TODO #1 Change to allow user to set wifi password
@@ -94,7 +89,7 @@ void setup()
   // Optional functionalities of EspMQTTClient
   client->enableDebuggingMessages(); // Enable debugging messages sent to serial output
   client->enableHTTPWebUpdater(); // Enable the web updater. User and password default to values of MQTTUsername and MQTTPassword. These can be overridden with enableHTTPWebUpdater("user", "password").
-  client->enableOTA(); // Enable OTA (Over The Air) updates. Password defaults to MQTTPassword. Port is the default OTA port. Can be overridden with enableOTA("password", port).
+  //client->enableOTA(); // Enable OTA (Over The Air) updates. Password defaults to MQTTPassword. Port is the default OTA port. Can be overridden with enableOTA("password", port).
   client->enableLastWillMessage(deviceChannel, "Disconnected");  // You can activate the retain flag by setting the third parameter to true
   
   //Configure the interupt for the cap touch sensor
@@ -110,7 +105,7 @@ void setup()
 void loop()
 {
   client->loop(); //Wifi keep alive
-  display(colors); //TODO putting this here so we can have a progressive fade/refresh in the future
+  display(colors); //TODO putting this here so we can have a progressive fade/blink/refresh in the future
 
   if (client->isMqttConnected()){
     if (touchBtn.pressed) {
@@ -131,7 +126,7 @@ void loop()
         jsonTxBuffer["event"] = "touch";
         jsonTxBuffer["device"] = fullMAC; 
         jsonTxBuffer["delta"] = touchBtn.delta;
-        sendJSON(jsonTxBuffer); 
+        sendJSON(jsonTxBuffer, "greengame/events/"); 
       }
 
       touchBtn.pressed = false;
@@ -162,7 +157,7 @@ void loop()
         StaticJsonDocument<200> jsonTxBuffer;
         jsonTxBuffer["event"] = "sync";
         jsonTxBuffer["device"] = fullMAC; 
-        sendJSON(jsonTxBuffer);
+        sendJSON(jsonTxBuffer, "greengame/events/");
       }
       else if (event.eventTime >= (touchBtn.touchTime - syncTime)){
         String log = String("they lose\n Event occured at: " + String(event.eventTime) + "\n Last touch Event at: " + String(touchBtn.delta));
@@ -182,7 +177,7 @@ void loop()
         StaticJsonDocument<200> jsonTxBuffer;
         jsonTxBuffer["event"] = "sync";
         jsonTxBuffer["device"] = fullMAC; 
-        sendJSON(jsonTxBuffer);
+        sendJSON(jsonTxBuffer, "greengame/events/");
       }
 
       display(colors);
@@ -191,6 +186,7 @@ void loop()
   }
   else {
     //Show red anytime the MQTT connection has died
+    //TODO Change offline indicator to breatheing
     colors.redBrightness = 255;
     colors.blueBrightness = 0;
     colors.greenBrightness = 0;
@@ -215,10 +211,11 @@ void recieveEvents(const String& msg){
   /*even types:
     0: No Event/Unknown
     FF: other event
-    2: OTA
+    TODO 2: OTA
     3: Touch
     4: Sync
-    5: Disable
+    TODO 5: Disable touch events via MQTT
+    TODO 6: factory reset
   */
   StaticJsonDocument<200> jsonRxBuffer;
   DeserializationError error = deserializeJson(jsonRxBuffer, msg);
@@ -283,12 +280,27 @@ void updateFirmware(uint8_t *data, size_t len){
 }
 
 
-void sendJSON(const JsonDocument& json){
+String getMacAddress(){
+   uint8_t baseMac[6];
+   // Get MAC address for WiFi station
+   esp_read_mac(baseMac, ESP_MAC_WIFI_STA);
+
+   char baseMacChr[18] = {0};
+   sprintf(baseMacChr, "%02X:%02X:%02X:%02X:%02X:%02X", baseMac[0], baseMac[1], baseMac[2], baseMac[3], baseMac[4], baseMac[5]);
+   String macAddress = String(baseMacChr);
+
+   Serial.print("MAC Address :: ");
+   Serial.println(macAddress);
+
+   return String(baseMacChr);
+}
+
+void sendJSON(const JsonDocument& json, const char* channel){
     char msg[128];
     int b =serializeJson(json, msg);
     Serial.print("message length = ");
     Serial.println(b,DEC);
-    client->publish("greengame/events/", msg); // You can activate the retain flag by setting the third parameter to true  
+    client->publish(String(channel), msg); // You can activate the retain flag by setting the third parameter to true  
 }
 
 
@@ -297,6 +309,15 @@ void onConnectionEstablished(){
   // Subscribe to "mytopic/test" and display received message to Serial
   client->subscribe("greengame/events/", recieveEvents);
   client->subscribe(String("greengame/OTA/" + String(deviceID)), fetchOTA);
+
+  // Publish a message 
+  StaticJsonDocument<200> jsonTxBuffer;
+  jsonTxBuffer["event"] = "connected";
+  jsonTxBuffer["device"] = deviceID; 
+  jsonTxBuffer["ipaddr"] = WiFi.localIP();
+  jsonTxBuffer["FW_Ver"] = FW_Version;
+  jsonTxBuffer["HW_Ver"] = HW_Version;
+  sendJSON(jsonTxBuffer, deviceChannel); 
 
   // Publish a message to "mytopic/test"
   client->publish(deviceChannel, "Connected"); // You can activate the retain flag by setting the third parameter to true
