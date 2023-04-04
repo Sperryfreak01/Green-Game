@@ -262,23 +262,6 @@ void display(struct LEDstruct led) {
 }
 
 
-void updateFirmware(uint8_t *data, size_t len){
-  // Function to update firmware incrementally
-  // Buffer is declared to be 128 so chunks of 128 bytes
-  // from firmware is written to device until server closes
-
-  Update.write(data, len);
-  currentLength += len;
-  // Print dots while waiting for update to finish
-  Serial.print('.');
-  // if current length of written firmware is not equal to total firmware size, repeat
-  if(currentLength != totalLength) return;
-  Update.end(true);
-  Serial.printf("\nUpdate Success, Total Size: %u\nRebooting...\n", currentLength);
-  // Restart ESP32 to see changes 
-  ESP.restart();
-}
-
 
 String getMacAddress(){
    uint8_t baseMac[6];
@@ -328,6 +311,25 @@ void onConnectionEstablished(){
   colors.whiteBrightness = 0;
 }
 
+/*disabling the MQTT OTA for now
+
+void updateFirmware(uint8_t *data, size_t len){
+  // Function to update firmware incrementally
+  // Buffer is declared to be 128 so chunks of 128 bytes
+  // from firmware is written to device until server closes
+
+  Update.write(data, len);
+  currentLength += len;
+  // Print dots while waiting for update to finish
+  Serial.print('.');
+  // if current length of written firmware is not equal to total firmware size, repeat
+  if(currentLength != totalLength) return;
+  Update.end(true);
+  Serial.printf("\nUpdate Success, Total Size: %u\nRebooting...\n", currentLength);
+  // Restart ESP32 to see changes 
+  ESP.restart();
+}
+
 
 bool fetchOTA(const String& HOST) {
   bool status;
@@ -375,4 +377,6 @@ bool fetchOTA(const String& HOST) {
   return status;
 }
 
+
+*/
 
