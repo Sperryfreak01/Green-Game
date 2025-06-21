@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ESP32 Wi-Fi Configurator</title>
+  <style>
+    body { font-family: sans-serif; max-width: 400px; margin: 2em auto; }
+    label, select, input, button { display: block; width: 100%; margin-bottom: 1em; }
+  </style>
+</head>
+<body>
+  <h1>Configure ESP32 Wi-Fi</h1>
+
+  <button id="connect">Connect to ESP32</button>
+
+  <label for="ssid">SSID</label>
+  <select id="ssid"></select>
+
+  <label for="pass">Password</label>
+  <input type="password" id="pass" placeholder="••••••••">
+
+  <button id="send">Send Credentials</button>
+
+  <script>
+    const SERVICE_UUID   = '12345678-1234-1234-1234-1234567890ab';
+    const SCAN_CHAR_UUID = '12345678-1234-1234-1234-1234567890ac';
+    const CONF_CHAR_UUID = '12345678-1234-1234-1234-1234567890ad';
+
+    let device, server, scanChar, configChar;
+
+    document.getElementById('connect').onclick = async () => {
+      device = await navigator.bluetooth.requestDevice({
+        filters: [{ services: [SERVICE_UUID] }]
+      });
+      server = await device.gatt.connect();
+      const svc = await server.getPrimaryService(SERVICE_UUID);
+      scanChar   = await svc.getCharacteristic(SCAN_CHAR_UUID);
+      configChar = await svc.getCharacteristic(CONF_CHAR_UUID);
+
+      // Read SSID list
+      const val = await scanChar.readValue();
+      const decoder = new TextDecoder();
+      const ssids = JSON.parse(decoder.decode(val));
+      const sel = document.getElementById('ssid');
+      sel.innerHTML = ssids.map(s => `<option>${s}</option>`).join('');
+      alert('Loaded ' + ssids.length + ' networks');
+    };
+
+    document.getElementById('send').onclick = async () => {
+      if (!configChar) {
+        alert('Connect first!');
+        return;
+      }
+      const ssid = document.getElementById('ssid').value;
+      const pass = document.getElementById('pass').value;
+      const blob = JSON.stringify({ ssid, pass });
+      const encoder = new TextEncoder();
+      await configChar.writeValue(encoder.encode(blob));
+      alert('Credentials sent—ESP32 will reboot into STA mode.');
+    };
+  </script>
+</body>
+</html>
