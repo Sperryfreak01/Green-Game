@@ -9,18 +9,17 @@ void IRAM_ATTR touchEvent(void);
 //===================================== Structure Def ============================================
 
 struct Button {
-	volatile unsigned long touchTime = 0;
+  volatile unsigned long touchTime = 0;
   volatile unsigned long delta = 9999999;
-	volatile bool pressed = false;
+  volatile bool pressed = false;
 };
 
 struct LEDstruct {
- 	uint8_t redBrightness = 0;
-	uint8_t greenBrightness = 0;
+  uint8_t redBrightness = 0;
+  uint8_t greenBrightness = 0;
   uint8_t blueBrightness = 0;
-	uint8_t whiteBrightness = 0;
+  uint8_t whiteBrightness = 0;
 };
-
 
 struct Event {
   bool newEvent = false;
@@ -35,7 +34,6 @@ struct Event {
 int totalLength;       //total size of firmware
 int currentLength = 0; //current size of written firmware
 
-
 // Webserver on port 80
 WebServer server(80);
 // Preferences namespace
@@ -44,12 +42,12 @@ Preferences prefs;
 Button touchBtn;
 LEDstruct colors;
 Event event;
-// Set custom IP for the SoftAP before starting it
-  IPAddress apIP(192, 168, 4, 1);      // Default ESP32 AP IP, change as needed
-  IPAddress gateway(192, 168, 4, 1);   // Gateway (usually same as IP)
-  IPAddress subnet(255, 255, 255, 0);  // Subnet mask
-DNSServer dnsServer;
 
+// Set custom IP for the SoftAP before starting it
+IPAddress apIP(192, 168, 4, 1);      // Default ESP32 AP IP, change as needed
+IPAddress gateway(192, 168, 4, 1);   // Gateway (usually same as IP)
+IPAddress subnet(255, 255, 255, 0);  // Subnet mask
+DNSServer dnsServer;
 
 // Duration of one full transition in milliseconds
 const unsigned long TRANSITION_DURATION = 3000;
@@ -57,8 +55,6 @@ const unsigned long TRANSITION_DURATION = 3000;
 unsigned long startTime = 0;
 bool forward = true;
 //=================================== End Variable Def ==========================================
-
-
 
 void setup()
 //setup all the LED control pin
@@ -74,7 +70,7 @@ void setup()
   digitalWrite(GREENPIN, LOW);
   pinMode(WHITEPIN, OUTPUT);
   digitalWrite(WHITEPIN, LOW);
-  
+
   //Configure the interupt for the cap touch sensor
   pinMode(4, INPUT);
   attachInterrupt(digitalPinToInterrupt(4), touchEvent, RISING);
@@ -108,19 +104,19 @@ void setup()
 
     String tmpdeviceChannel = String("greengame/device/") + String(deviceID); //MQTT channel for this specific device, used to post status msgs, logs, targeted OTAs, etc.
     strcpy (deviceChannel,tmpdeviceChannel.c_str());
-    
+
     //set the color to red because we are disconnected
     setLEDColors(255, 0, 0, 0); // Set the color to red because we are disconnected
-    
+
     client = new EspMQTTClient(
-        SSID,         // TODO #1 Change to allow user to set wifi password
-        WIFIPASS,
-        BROKER,       // MQTT Broker server ip
-        MQTTu,        // Can be omitted if not needed
-        MQTTp,     // "green1" Client name that uniquely identify your device  #TODO #2 make MQTT login client name dynamic somehow
-        mqttuser,  // Client name that uniquely identify your device, default to "ESP32Client" if not set
-        1883          // The MQTT port, default to 1883. this line can be omitted
-        );
+      SSID,         // TODO #1 Change to allow user to set wifi password
+      WIFIPASS,
+      BROKER,       // MQTT Broker server ip
+      MQTTu,        // Can be omitted if not needed
+      MQTTp,     // "green1" Client name that uniquely identify your device  #TODO #2 make MQTT login client name dynamic somehow
+      mqttuser,  // Client name that uniquely identify your device, default to "ESP32Client" if not set
+      1883          // The MQTT port, default to 1883. this line can be omitted
+    );
 
     // Optional functionalities of EspMQTTClient
     client->enableDebuggingMessages(); // Enable debugging messages sent to serial output
@@ -128,15 +124,14 @@ void setup()
     //client->enableOTA(); // Enable OTA (Over The Air) updates. Password defaults to MQTTPassword. Port is the default OTA port. Can be overridden with enableOTA("password", port).
     client->enableLastWillMessage(deviceChannel, "Disconnected");  // You can activate the retain flag by setting the third parameter to true
     client->setKeepAlive(60); // Set the keep alive interval in seconds, default is 15 seconds
-    
 
     while(!client->isWifiConnected())
     {
-        client->loop();
-        setLEDColors(0, 255, 0, 0); // Set the color to blue -> connected to wifi but not MQTT
-        display(colors);
+      client->loop();
+      setLEDColors(0, 255, 0, 0); // Set the color to blue -> connected to wifi but not MQTT
+      display(colors);
     }
-      
+
     syncNTP();
     calcCurrentTimeMillis(); 
     printCurrentTimeMillis();
@@ -144,17 +139,17 @@ void setup()
     //Zero out the system time, we will use this time to compute who the winner is on a MQTT touch event
     syncTime=millis();
     startMillis = millis();  //initial start time
+    return;
   } else {
-      Serial.println("No stored WiFi credentials.");
-    }
+    Serial.println("No stored WiFi credentials.");
+  }
   // If we get here, provisioning is needed
   startProvisioningAP();
 }
 
-
-
 void loop()
-{ unsigned long elapsed = millis() - startTime;
+{
+  unsigned long elapsed = millis() - startTime;
 
   // If in provisioning mode, handle incoming HTTP clients
   if (WiFi.getMode() == WIFI_AP) {
@@ -177,14 +172,15 @@ void loop()
     setLEDColors(r, b, g, 0); 
     display(colors);
   }
-    // If not in provisioning mode, handle normal operation
-    else {
-      client->loop(); //Wifi keep alive
-      display(colors); //TODO putting this here so we can have a progressive fade/blink/refresh in the future
+  // If not in provisioning mode, handle normal operation
+  else {
+    //Serial.println("Normal operation mode");
+    client->loop(); //Wifi keep alive
+    display(colors); //TODO putting this here so we can have a progressive fade/blink/refresh in the future
 
-      if (client->isMqttConnected()){
-        if (touchBtn.pressed) {
-          deltaTime = touchBtn.touchTime - syncTime;
+    if (client->isMqttConnected()){
+      if (touchBtn.pressed) {
+        deltaTime = touchBtn.touchTime - syncTime;
         if (deltaTime >= debouceTime){
           String log = String("touch Event at delta of: " + String(touchBtn.delta));
           Serial.println(log);
@@ -211,7 +207,7 @@ void loop()
           String log = String("they win\n Event occured at: " + String(event.eventTime) + "\n Last touch Event at: " + String(touchBtn.delta));
           Serial.println(log);
           client->publish(deviceChannel, log);
-          
+
           //the event happened sooner than our last touch event, filters out delayed messages?? thats what I am telling myself.
           //set the color to red and sync the time
           setLEDColors(0, 0, 0, 255); 
@@ -242,8 +238,8 @@ void loop()
       //TODO Change offline indicator to breatheing
       setLEDColors(128, 128, 0, 0); 
     }
+  }
 }
-
 
 void IRAM_ATTR touchEvent(){
   touchBtn.touchTime = millis();
@@ -254,7 +250,6 @@ void IRAM_ATTR touchEvent(){
   //Serial.println(touchBtn.delta);
   //Serial.println(syncTime);
   //Serial.println(millis());
-  
 }
 
 void synchronize(){
@@ -274,56 +269,56 @@ void recieveEvents(const String& msg){
   StaticJsonDocument<200> jsonRxBuffer;
   DeserializationError error = deserializeJson(jsonRxBuffer, msg);
   if (error){
-      Serial.println("event did not contain JSON");
-      Serial.print(msg);
+    Serial.println("event did not contain JSON");
+    Serial.print(msg);
   }
   else if(jsonRxBuffer["event"] == "OTA"){
-      //Serial.println("got MQTT OTA event");
-      //serializeJson(jsonRxBuffer, Serial);
-      if (jsonRxBuffer.containsKey("url")) {
-        String otaUrl = jsonRxBuffer["url"].as<String>();
-        Serial.println("Received OTA event, fetching firmware from: " + otaUrl);
-        if (jsonRxBuffer.containsKey("persist")) {
-          bool persist = jsonRxBuffer["persist"].as<bool>();
-          Serial.println("Persist OTA: " + String(persist));
-          fetchOTA(otaUrl, persist);
-        } else {
-          Serial.println("No persist flag provided, defaulting to true.");
-          fetchOTA(otaUrl);
-        }
+    //Serial.println("got MQTT OTA event");
+    //serializeJson(jsonRxBuffer, Serial);
+    if (jsonRxBuffer.containsKey("url")) {
+      String otaUrl = jsonRxBuffer["url"].as<String>();
+      Serial.println("Received OTA event, fetching firmware from: " + otaUrl);
+      if (jsonRxBuffer.containsKey("persist")) {
+        bool persist = jsonRxBuffer["persist"].as<bool>();
+        Serial.println("Persist OTA: " + String(persist));
+        fetchOTA(otaUrl, persist);
       } else {
-        Serial.println("OTA event received but no URL provided.");
+        Serial.println("No persist flag provided, defaulting to true.");
+        fetchOTA(otaUrl);
       }
-    }  
-  else if(jsonRxBuffer["event"] == "touch"){
-      //Serial.println(msg);
-      Serial.println("got MQTT touch event");
-      serializeJson(jsonRxBuffer, Serial);
-      if (jsonRxBuffer["device"] != deviceID){
-        event.newEvent = true;
-        event.eventTime = jsonRxBuffer["delta"];
-        event.deviceID = jsonRxBuffer["device"];
-      }
-      else{
-        Serial.println("this was our event");
-      }
-      return;      
+    } else {
+      Serial.println("OTA event received but no URL provided.");
     }
+  }  
+  else if(jsonRxBuffer["event"] == "touch"){
+    //Serial.println(msg);
+    Serial.println("got MQTT touch event");
+    serializeJson(jsonRxBuffer, Serial);
+    if (jsonRxBuffer["device"] != deviceID){
+      event.newEvent = true;
+      event.eventTime = jsonRxBuffer["delta"];
+      event.deviceID = jsonRxBuffer["device"];
+    }
+    else{
+      Serial.println("this was our event");
+    }
+    return;      
+  }
   else if(jsonRxBuffer["event"] == "sync"){ //someone just  processed a wining event - everyone clear thier timers to sync up
-      Serial.println("syncing time");   //will fire off everytime a player processes, this will not scale and will pump traffic
-      synchronize();
-      //if(jsonRxBuffer["device"] != deviceID){} //no need to sync on our own event only others...wait maybe we do so everyone has round trip latency...test it...
-      //  synchronize()
-      //}
-    } 
+    Serial.println("syncing time");   //will fire off everytime a player processes, this will not scale and will pump traffic
+    synchronize();
+    //if(jsonRxBuffer["device"] != deviceID){} //no need to sync on our own event only others...wait maybe we do so everyone has round trip latency...test it...
+    //  synchronize()
+    //}
+  } 
   else if(jsonRxBuffer["event"] == "reset"){ //someone just  processed a wining event - everyone clear thier timers to sync up
     factoryReset();
-    } 
+  } 
   else {
     Serial.println("unknown JSON event type");
     //Serial.print(jsonRxBuffer);
-    }
- }
+  }
+}
 
 void factoryReset() {
   // Reset the device to factory settings
@@ -332,7 +327,7 @@ void factoryReset() {
   prefs.begin("wifi", false);
   prefs.clear();
   prefs.end();
-  
+
   // Optionally, reset other settings or configurations here
 
   // Restart the device
@@ -355,26 +350,26 @@ void setLEDColors(uint8_t red, uint8_t blue, uint8_t green, uint8_t white) {
 }
 
 String getMacAddress(){
-   uint8_t baseMac[6];
-   // Get MAC address for WiFi station
-   esp_read_mac(baseMac, ESP_MAC_WIFI_STA);
+  uint8_t baseMac[6];
+  // Get MAC address for WiFi station
+  esp_read_mac(baseMac, ESP_MAC_WIFI_STA);
 
-   char baseMacChr[18] = {0};
-   sprintf(baseMacChr, "%02X:%02X:%02X:%02X:%02X:%02X", baseMac[0], baseMac[1], baseMac[2], baseMac[3], baseMac[4], baseMac[5]);
-   String macAddress = String(baseMacChr);
+  char baseMacChr[18] = {0};
+  sprintf(baseMacChr, "%02X:%02X:%02X:%02X:%02X:%02X", baseMac[0], baseMac[1], baseMac[2], baseMac[3], baseMac[4], baseMac[5]);
+  String macAddress = String(baseMacChr);
 
-   Serial.print("MAC Address :: ");
-   Serial.println(macAddress);
-  
-   return String(baseMacChr);
+  Serial.print("MAC Address :: ");
+  Serial.println(macAddress);
+
+  return String(baseMacChr);
 }
 
 void sendJSON(const JsonDocument& json, const char* channel){
-    char msg[128];
-    int b =serializeJson(json, msg);
-    Serial.print("message length = ");
-    Serial.println(b,DEC);
-    client->publish(String(channel), msg); // You can activate the retain flag by setting the third parameter to true  
+  char msg[128];
+  int b =serializeJson(json, msg);
+  Serial.print("message length = ");
+  Serial.println(b,DEC);
+  client->publish(String(channel), msg); // You can activate the retain flag by setting the third parameter to true  
 }
 
 void onConnectionEstablished(){
@@ -395,7 +390,7 @@ void onConnectionEstablished(){
 
   // Publish a message to "mytopic/test"
   client->publish(deviceChannel, "Connected"); // You can activate the retain flag by setting the third parameter to true
-  
+
   setLEDColors(0, 0, 0, 255); 
 }
 
@@ -421,7 +416,7 @@ bool fetchOTA(const String& url, bool persist) {
   // Check if the URL starts with "http"
   if (!url.startsWith("http")) {
     Serial.println("OTA URL must start with http:// or https://");
-      Serial.println(url);
+    Serial.println(url);
     return false;
   }
   // Connect to external web server
@@ -435,7 +430,6 @@ bool fetchOTA(const String& url, bool persist) {
     prefs.end();
   }
 
-
   int resp = OTAclient.begin(url);
   if (resp != 1) {
     Serial.print("OTAclient.begin() failed, return code: ");
@@ -448,38 +442,38 @@ bool fetchOTA(const String& url, bool persist) {
   Serial.println(resp);
   // If file is reachable, start downloading
   if(resp == 200){
-      // get length of document (is -1 when Server sends no Content-Length header)
-      totalLength = OTAclient.getSize();
-      // transfer to local variable
-      int len = totalLength;
-      // this is required to start firmware update process
-      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
-        Serial.println("Update.begin() failed!");
-        OTAclient.end();
-        return false;
+    // get length of document (is -1 when Server sends no Content-Length header)
+    totalLength = OTAclient.getSize();
+    // transfer to local variable
+    int len = totalLength;
+    // this is required to start firmware update process
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+      Serial.println("Update.begin() failed!");
+      OTAclient.end();
+      return false;
+    }
+    Serial.printf("FW Size: %u\n",totalLength);
+    // create buffer for read
+    uint8_t buff[128] = { 0 };
+    // get tcp stream
+    WiFiClient * stream = OTAclient.getStreamPtr();
+    // read all data from server
+    Serial.println("Updating firmware...");
+    while(OTAclient.connected() && (len > 0 || len == -1)) {
+      // get available data size
+      size_t size = stream->available();
+      if(size) {
+        // read up to 128 byte
+        int c = stream->readBytes(buff, ((size > sizeof(buff)) ? sizeof(buff) : size));
+        // pass to function
+        updateFirmware(buff, c);
+        if(len > 0) {
+          len -= c;
+        }
       }
-      Serial.printf("FW Size: %u\n",totalLength);
-      // create buffer for read
-      uint8_t buff[128] = { 0 };
-      // get tcp stream
-      WiFiClient * stream = OTAclient.getStreamPtr();
-      // read all data from server
-      Serial.println("Updating firmware...");
-      while(OTAclient.connected() && (len > 0 || len == -1)) {
-           // get available data size
-           size_t size = stream->available();
-           if(size) {
-              // read up to 128 byte
-              int c = stream->readBytes(buff, ((size > sizeof(buff)) ? sizeof(buff) : size));
-              // pass to function
-              updateFirmware(buff, c);
-              if(len > 0) {
-                 len -= c;
-              }
-           }
-           delay(1);
-      }
-      status = true;
+      delay(1);
+    }
+    status = true;
   }else{
     Serial.println("Cannot download firmware file. Only HTTP response 200: OK is supported. Double check firmware location.");
     status = false;
@@ -489,14 +483,14 @@ bool fetchOTA(const String& url, bool persist) {
 }
 
 void syncNTP() {
-    // Initialize and get the time
-    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-    struct tm timeinfo;
-    if (!getLocalTime(&timeinfo)) {
-      Serial.println("Failed to obtain time");
-      return;
-    }
-  }  
+  // Initialize and get the time
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    Serial.println("Failed to obtain time");
+    return;
+  }
+}  
 
 void calcCurrentTimeMillis() {
   // Calculate the boot time in milliseconds since the epoch
@@ -516,9 +510,9 @@ void removeColons(char* str) {
   int length = strlen(str);
   int j = 0;
   for (int i = 0; i < length; ++i) {
-      if (str[i] != ':') {
-          str[j++] = str[i];
-      }
+    if (str[i] != ':') {
+      str[j++] = str[i];
+    }
   }
   str[j] = '\0'; // Null-terminate the modified string
 }
@@ -557,15 +551,13 @@ void startProvisioningAP() {
   String suffix = mac.substring(mac.length() - 4); // last 4 characters
   String apName = "fungers-" + suffix;
 
-  
-
   WiFi.softAPConfig(apIP, gateway, subnet);
 
   // AP SSID will be "fungers-xxxx"
   WiFi.softAP(apName.c_str());
   //ip = WiFi.softAPIP();
   Serial.printf("Provisioning AP started. Connect to http://%s (SSID: %s)\n", apIP.toString().c_str(), apName.c_str());
-  
+
   dnsServer.start(53, "*", apIP); // Start DNS server to redirect all requests to the AP IP
 
   // Setup HTTP routes
@@ -589,7 +581,6 @@ void handleNotFound() {
   server.sendHeader("Location", redirectURL, true);   // true = replace any existing header
   // iOS captive-portal requires a non-empty body
   server.send(302, "text/html", provisioningPage); // or your config HTML
-  
 }
 
 int interpolate(int start, int end, float t) {
