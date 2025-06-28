@@ -46,6 +46,8 @@ unsigned long syncTime;
 unsigned long deltaTime;
 uint8_t debouceTime = 50;
 
+String options = "";
+
 
 //Device ID stuff
 uint32_t macLow;
@@ -85,6 +87,11 @@ struct Event {
   bool newEvent = false;
   unsigned long eventTime = 0;
   uint64_t deviceID = 0;
+};
+
+struct NetworkInfo {
+  String ssid;
+  int32_t rssi;
 };
 
 //=================================== End Structure Def ==========================================
@@ -136,6 +143,7 @@ void handleNotFound();
 void factoryReset();
 void sendLog(const String& log, int msgLevel = INFO);
 String getMacAddress();
+std::vector<NetworkInfo> scanNetworks();
 
 // HTML page served for Wi-Fi provisioning
 
@@ -286,3 +294,11 @@ const char* provisioningPage = R"rawliteral(
 </html>
 
 )rawliteral";
+
+
+
+
+
+
+
+

@@ -2,7 +2,8 @@
 //#define DEBUG_ESP_DNS_SERVER 1
 
 #include <GreenGame.h>
-
+#include <vector>
+#include <algorithm>
 // In setup(), after creating the client, register the callback:
   // client->setOnConnectionFailed(onConnectionFailed);
 
@@ -147,6 +148,11 @@ void setup()
     Serial.println("No stored WiFi credentials.");
   }
   // If we get here, provisioning is needed
+  auto networks = scanNetworks();
+  for (const auto& net : networks) {
+    options += "<option value=\"" + net.ssid + "\">" + net.ssid + " (" + String(net.rssi) + " dBm)</option>";
+  }
+  sendLog(options, VERBOSE);
   startProvisioningAP();
 }
 
@@ -369,15 +375,15 @@ void setLEDColors(uint8_t red, uint8_t blue, uint8_t green, uint8_t white) {
     time_t now;
     time(&now);
     //unsigned long ms = now;
-    sendLog("Epoch: " + String(now), DEBUG); // Adjust for your timezone if needed
+    sendLog("Epoch: " + String(now), VERBOSE); // Adjust for your timezone if needed
 
     //unsigned long s  = now / 1000UL;            // convert to seconds
     unsigned long secsToday = now % 86400UL;     // seconds since last UTC midnight
     int hour = secsToday / 3600UL;             // integer 0–23
-    sendLog("Hour (UTC): " + String(hour), DEBUG); // Adjust for your timezone if needed
+    sendLog("Hour (UTC): " + String(hour), VERBOSE); // Adjust for your timezone if needed
     // Adjust hour for your timezone, e.g., PDT is UTC-7
     if(hour - 7 < 0) hour += 24; // Adjust for your timezone if needed
-    sendLog("Hour (PDT): " + String(hour - 7), DEBUG); // Adjust for your timezone if needed
+    sendLog("Hour (PDT): " + String(hour - 7), VERBOSE); // Adjust for your timezone if needed
     
 
   if (hour >= 7 && hour < 20) {
@@ -567,7 +573,6 @@ void calcCurrentTimeMillis() {
   bootTimeMillis = now * 1000UL - millis();
 }
 
-
 void printCurrentTimeMillis() {
   unsigned long currentMillis = millis();
   unsigned long currentTimeMillis = (bootTimeMillis + currentMillis);
@@ -587,7 +592,149 @@ void removeColons(char* str) {
 
 // Handle root path: serve the form
 void handleRoot() {
-  server.send(200, "text/html", provisioningPage);
+String page = String(R"rawliteral(
+<!DOCTYPE HTML>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Fungers WiFi Setup</title>
+    <style>
+        :root {
+            --color-background:    #FFFDF9;
+            --color-text:          #232323;
+            --color-primary:       #FF5722;
+            --color-accent:        #4CAF50;
+            --color-accent-light:  #66BB6A;
+            --color-finger:        #FBC68F;
+            --font-sans:  'Poppins', sans-serif;
+            --font-display: 'Nunito', sans-serif;
+            --radius-pill: 9999px;
+            --spacing-sm:  .5rem;
+            --spacing:     1rem;
+            --spacing-lg:  1.5rem;
+            --shadow-sm:   0 1px 3px rgba(0,0,0,0.1);
+            --shadow-md:   0 4px 6px rgba(0,0,0,0.1);
+        }
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            background-color: var(--color-background);
+            color: var(--color-text);
+            padding: var(--spacing);
+            font-family: var(--font-sans);
+            font-size: 1rem;
+            font-weight: 600;
+            line-height: 1.6;
+        }
+        .logo-text {
+            font-family: var(--font-sans);
+            font-size: 2rem;
+            color: var(--color-primary);
+            text-align: center;
+            margin-bottom: var(--spacing-lg);
+            font-weight: 800;
+        }
+        .center { display: block; margin-left: auto; margin-right: auto; width: 50%; }
+        .button {
+            display: inline-block;
+            padding: var(--spacing-sm) var(--spacing-lg);
+            background-color: var(--color-accent);
+            color: white;
+            font-size: 1rem;
+            font-weight: 600;
+            font-family: var(--font-sans);
+            border: none;
+            border-radius: var(--radius-pill);
+            box-shadow: var(--shadow-sm);
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s, box-shadow 0.2s;
+        }
+        .button:hover {
+            background-color: var(--color-accent-light);
+            box-shadow: var(--shadow-md);
+            transform: translateY(-1px);
+        }
+        .button:active {
+            transform: translateY(0);
+            box-shadow: var(--shadow-sm);
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: var(--shadow-md);
+            padding: var(--spacing);
+            max-width: 400px;
+            margin: 0 auto;
+        }
+        .text-center { text-align: center; }
+        .mt-1 { margin-top: var(--spacing); }
+        .mb-1 { margin-bottom: var(--spacing); }
+        .p-1  { padding: var(--spacing); }
+
+        /* Center input fields in the card */
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .form-group label {
+            width: 100%;
+            text-align: center;
+            margin-bottom: 0.25rem;
+        }
+        .form-group input {
+            width: 80%;
+            max-width: 250px;
+            margin: 0 auto;
+            display: block;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+  <img class="center" src="...your image..." />
+  <h2 class="logo-text">Configure WiFi</h2>
+  <div class="card">
+    <form action="/save" method="POST">
+      <div class="mb-1 form-group">
+        <label for="ssid">SSID</label>
+        <select id="ssid" name="ssid" class="p-1">
+          <option value="">Select WiFi network</option>
+          )rawliteral" + options + R"rawliteral(
+        </select>
+        <input id="ssid_custom" name="ssid_custom" type="text" class="p-1" placeholder="Or enter SSID manually" />
+      </div>
+      <div class="mb-1 form-group">
+        <label for="pass">Password</label>
+        <input id="pass" name="pass" type="password" class="p-1" />
+      </div>
+      <div class="mb-1 form-group">
+        <label for="deviceName">User Name</label>
+        <input id="deviceName" name="deviceName" type="text" class="p-1" />
+      </div>
+      <div class="text-center mt-1">
+        <button type="submit" class="button">Save &amp; Reboot</button>
+      </div>
+    </form>
+  </div>
+  <script>
+    // If user selects from dropdown, update the text input
+    document.getElementById('ssid').addEventListener('change', function() {
+      document.getElementById('ssid_custom').value = this.value;
+    });
+  </script>
+</body>
+</html>
+  )rawliteral");
+  sendLog(page, VERBOSE);
+  server.send(200, "text/html", page);
+  //server.send(200, "text/html", provisioningPage);
 }
 
 // Handle form submission: save credentials then reboot
@@ -610,34 +757,63 @@ void handleSave() {
   }
 }
 
+std::vector<NetworkInfo> scanNetworks() {
+  WiFi.mode(WIFI_STA); // Ensure we're in station mode
+  delay(100);          // Allow mode switch to settle
+  std::vector<NetworkInfo> networks;
+  int n = WiFi.scanNetworks();
+  for (int i = 0; i < n; ++i) {
+    networks.push_back({WiFi.SSID(i), WiFi.RSSI(i)});
+  }
+  // Sort by RSSI (signal strength), descending
+  std::sort(networks.begin(), networks.end(), [](const NetworkInfo& a, const NetworkInfo& b) {
+    return a.rssi > b.rssi;
+  });
+  // Remove duplicates (same SSID)
+  std::vector<NetworkInfo> uniqueNetworks;
+  for (const auto& net : networks) {
+    bool exists = false;
+    for (const auto& u : uniqueNetworks) {
+      if (u.ssid == net.ssid) {
+        exists = true;
+        break;
+      }
+    }
+    if (!exists && net.ssid.length() > 0) uniqueNetworks.push_back(net);
+    if (uniqueNetworks.size() >= 10) break;
+  }
+  return uniqueNetworks;
+}
+
 void startProvisioningAP() {
-  // Get device ID (MAC address without colons)
-  String mac = getMacAddress();
-  mac.replace(":", "");
-  String suffix = mac.substring(mac.length() - 4); // last 4 characters
-  String apName = "fungers-" + suffix;
+    WiFi.mode(WIFI_AP); // Set WiFi mode to Access Point
+    // Get device ID (MAC address without colons)
+    String mac = getMacAddress();
+    mac.replace(":", "");
+    String suffix = mac.substring(mac.length() - 4); // last 4 characters
+    String apName = "fungers-" + suffix;
 
-  WiFi.softAPConfig(apIP, gateway, subnet);
+    WiFi.softAPConfig(apIP, gateway, subnet);
 
-  // AP SSID will be "fungers-xxxx"
-  WiFi.softAP(apName.c_str());
-  //ip = WiFi.softAPIP();
-  Serial.printf("Provisioning AP started. Connect to http://%s (SSID: %s)\n", apIP.toString().c_str(), apName.c_str());
+    // AP SSID will be "fungers-xxxx"
+    WiFi.softAP(apName.c_str());
+    //ip = WiFi.softAPIP();
+    Serial.printf("Provisioning AP started. Connect to http://%s (SSID: %s)\n", apIP.toString().c_str(), apName.c_str());
 
-  dnsServer.start(53, "*", apIP); // Start DNS server to redirect all requests to the AP IP
+    dnsServer.start(53, "*", apIP); // Start DNS server to redirect all requests to the AP IP
 
-  // Setup HTTP routes required to host the captive portal
-  server.on("/", HTTP_GET, handleRoot);
-  server.on("/save", HTTP_POST, handleSave);
-  // Handle common captive portal URLs
-  server.on("/generate_204", HTTP_GET, handleRoot); // Android
-  server.on("/fwlink", HTTP_GET, handleRoot);       // Windows
-  server.on("/hotspot-detect.html", HTTP_GET, handleRoot); // Apple
-  server.on("/ncsi.txt", HTTP_GET, handleRoot);     // Windows  
-  // Catch-all for any other requests
-  server.onNotFound(handleNotFound);
+    // Setup HTTP routes required to host the captive portal
+    server.on("/", HTTP_GET, handleRoot);
+    server.on("/save", HTTP_POST, handleSave);
+    // Handle common captive portal URLs
+    server.on("/generate_204", HTTP_GET, handleRoot); // Android
+    server.on("/fwlink", HTTP_GET, handleRoot);       // Windows
+    server.on("/hotspot-detect.html", HTTP_GET, handleRoot); // Apple
+    server.on("/ncsi.txt", HTTP_GET, handleRoot);     // Windows  
+    // Catch-all for any other requests
+    server.onNotFound(handleNotFound);
 
-  server.begin();
+    server.begin();
 }
 
 void handleNotFound() {
