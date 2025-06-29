@@ -142,7 +142,7 @@ char MQTTp[] = MQTT_PASSWORD;
 char mqttuser[] = "green1green1green1"; 
 char deviceID[18];
 char deviceChannel[40];    
-char FW_Version[] = "1.0.6";
+char FW_Version[] = "1.0.7";
 char HW_Version[]  = "1";
 
 void IRAM_ATTR touchEvent(void);
