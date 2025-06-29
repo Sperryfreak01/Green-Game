@@ -12,9 +12,11 @@
 #include <WebServer.h>
 #include <Preferences.h>
 #include <DNSServer.h>
+#include <vector>
+#include <algorithm>
 
 
-
+// Global constants and variables
 // Define log levels
 #define NONE    0
 #define ERROR   1
@@ -22,6 +24,18 @@
 #define INFO    3
 #define DEBUG   4
 #define VERBOSE 5
+
+// Define Event types
+#define EVENT_NONE 0
+#define EVENT_BUTTON 1
+#define EVENT_MQTT 2
+#define EVENT_SYNC 3
+#define EVENT_OTA 4
+#define EVENT_TOUCH 6
+
+#define FIRST 1;
+#define SECOND 2;
+#define OTHER 3;
 
 #define logLevelSerial  DEBUG // Set the default log level
 #define logLevelMQTT  INFO // Set the default MQTT log level
@@ -61,9 +75,9 @@ String deviceName;
 // NTP server to request time from
 const char* ntpServer = "pool.ntp.org";
 // Time offset in seconds (e.g., for UTC+1: 3600)
-const long gmtOffset_sec = 0;
+const long gmtOffset_sec = -28800; // Adjust for your timezone, e.g., PST (UTC-8)
 // Daylight offset in seconds (e.g., for daylight saving time: 3600)
-const int daylightOffset_sec = 0;
+const int daylightOffset_sec = -25200; // Adjust for your timezone, e.g., -25200 for PDT (UTC-7)
 unsigned long bootTimeMillis;
 
 //static 
@@ -81,6 +95,10 @@ struct LEDstruct {
   uint8_t greenBrightness = 0;
   uint8_t blueBrightness = 0;
   uint8_t whiteBrightness = 0;
+  uint8_t maxBrightness = 100; // Max brightness percentage (0-100) 
+  uint8_t nightBrightness = 100; // Night mode brightness percentage (0-100)
+  uint8_t nightEnd = 7; // Hour when night mode ends (0-23)
+  uint8_t nightStart = 20; // Hour when night mode starts (0-
 };
 
 struct Event {
@@ -94,6 +112,8 @@ struct NetworkInfo {
   int32_t rssi;
 };
 
+struct tm timeinfo;
+
 //=================================== End Structure Def ==========================================
 
 HTTPClient OTAclient;
@@ -105,6 +125,8 @@ Preferences prefs;
 Button touchBtn;
 LEDstruct colors;
 Event event;
+
+const char* timeZone = "PST8PDT,M3.2.0,M11.1.0"; // Set your timezone, e.g., "PST8PDT,M3.2.0,M11.1.0" for Pacific Time
 
 // Set custom IP for the SoftAP before starting it
 IPAddress apIP(192, 168, 4, 1);      // Default ESP32 AP IP, change as needed

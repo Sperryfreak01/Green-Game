@@ -2,8 +2,7 @@
 //#define DEBUG_ESP_DNS_SERVER 1
 
 #include <GreenGame.h>
-#include <vector>
-#include <algorithm>
+
 // In setup(), after creating the client, register the callback:
   // client->setOnConnectionFailed(onConnectionFailed);
 
@@ -58,6 +57,12 @@ void setup()
   pinMode(WHITEPIN, OUTPUT);
   digitalWrite(WHITEPIN, LOW);
 
+  prefs.begin("display", true);
+  colors.maxBrightness = prefs.getUInt("maxBrightness", 100); // Get max brightness from preferences, default to 255
+  colors.nightBrightness = prefs.getUInt("nightBrightness", 50); // Get max brightness from preferences, default to 255
+  colors.nightEnd = prefs.getUChar("nightEnd", 7); // Get night end hour from preferences, default to 7
+  colors.nightStart = prefs.getUChar("nightStart", 20); // Get night start hour from preferences, default to 20
+  prefs.end();
   //Configure the interupt for the cap touch sensor
   pinMode(4, INPUT);
   attachInterrupt(digitalPinToInterrupt(4), touchEvent, RISING);
@@ -184,12 +189,12 @@ void loop()
     //display(colors);
   }
   // If not in provisioning mode, handle normal operation
-  else {
+  else if (WiFi.getMode() == WIFI_STA || WiFi.getMode() == WIFI_AP_STA) {
     //Serial.println("Normal operation mode");
     client->loop(); //Wifi keep alive
-    display(colors); //TODO putting this here so we can have a progressive fade/blink/refresh in the future
     
     if (client->isMqttConnected()){
+      
       if (touchBtn.pressed) { //TODO #4 add support for press and hold events to trigger clearing of Wifi settings
         deltaTime = touchBtn.touchTime - syncTime;
         if (deltaTime >= debouceTime){
@@ -241,6 +246,14 @@ void loop()
         display(colors);
         event.newEvent = false;    
       }
+      
+      else{
+      //TODO #16 when in last place make it breathe white
+      //setLEDColors(0,0,0,255); // Set the color to white when connected to MQTT
+      //display(colors);
+      //display(colors); //TODO putting this here so we can have a progressive fade/blink/refresh in the future
+      //delay(10); // If we are connected to MQTT, just wait a bit
+    }
     }
   
     else if(!client->isMqttConnected()){
@@ -264,7 +277,9 @@ void loop()
       setLEDColors(r, b, g, 0); 
       //setLEDColors(128, 128, 0, 0); 
     }
+
   }
+  
 }
 
 void IRAM_ATTR touchEvent(){
@@ -279,9 +294,22 @@ void IRAM_ATTR touchEvent(){
 }
 
 void synchronize(){
-  void syncNTP();
+  syncNTP();
   // Set the syncTime to the current millis, this will be used to calculate the delta
   syncTime = millis();
+}
+
+void calcCurrentTimeMillis() {
+  // Calculate the boot time in milliseconds since the epoch
+  time_t now;
+  time(&now);
+  bootTimeMillis = now * 1000UL - millis();
+}
+
+void printCurrentTimeMillis() {
+  unsigned long currentMillis = millis();
+  unsigned long currentTimeMillis = (bootTimeMillis + currentMillis);
+  sendLog("Current time in milliseconds since epoch: "+ String(currentTimeMillis), DEBUG);
 }
 
 void recieveEvents(const String& msg){
@@ -320,6 +348,36 @@ void recieveEvents(const String& msg){
   else if(jsonRxBuffer["event"] == "connected"){
     return; //ignore connected events, we already know we are connected
   }
+  else if(jsonRxBuffer["event"] == "display"){
+    if (jsonRxBuffer.containsKey("maxBrightness")) {
+      colors.maxBrightness = jsonRxBuffer["maxBrightness"].as<u_int8_t>();
+      prefs.begin("display", false);
+      prefs.putUInt("maxBrightness", colors.maxBrightness);
+      prefs.end();
+      sendLog("Max brightness set to: " + String(colors.maxBrightness), DEBUG);
+    }
+    if (jsonRxBuffer.containsKey("nightBrightness")) {
+      colors.nightBrightness = jsonRxBuffer["nightBrightness"].as<u_int8_t>();
+      prefs.begin("display", false);
+      prefs.putUInt("nightBrightness", colors.nightBrightness);
+      prefs.end();
+      sendLog("Night brightness set to: " + String(colors.nightBrightness), DEBUG);
+    }
+      if (jsonRxBuffer.containsKey("nightStart")) {
+      colors.nightStart = jsonRxBuffer["nightStart"].as<u_int8_t>();
+      prefs.begin("display", false);
+      prefs.putUInt("nightStart", colors.nightStart);
+      prefs.end();
+      sendLog("Night mode start set to: " + String(colors.nightStart), DEBUG);
+    }
+      if (jsonRxBuffer.containsKey("nightEnd")) {
+      colors.nightEnd = jsonRxBuffer["nightEnd"].as<u_int8_t>();
+      prefs.begin("display", false);
+      prefs.putUInt("nightEnd", colors.nightEnd);
+      prefs.end();
+      sendLog("Night mode end hour set to: " + String(colors.nightEnd), DEBUG);
+    }
+  }
   else if(jsonRxBuffer["event"] == "touch"){
     //Serial.println(msg);
     sendLog("got MQTT touch event");
@@ -330,7 +388,7 @@ void recieveEvents(const String& msg){
       event.deviceID = jsonRxBuffer["device"];
     }
     else{
-      Serial.println("this was our event");
+      sendLog("this was our event",DEBUG);
     }
     return;      
   }
@@ -341,7 +399,7 @@ void recieveEvents(const String& msg){
     //  synchronize()
     //}
   } 
-  else if(jsonRxBuffer["event"] == "reset"){ //someone just  processed a wining event - everyone clear thier timers to sync up
+  else if(jsonRxBuffer["event"] == "reset"){ //clear all settings in the prefrences space and restart
     factoryReset();
   } 
   else {
@@ -352,55 +410,23 @@ void recieveEvents(const String& msg){
 
 void factoryReset() {
   // Reset the device to factory settings
-  sendLog("Factory reset initiated.",INFO);
+  sendLog("Factory reset initiated.",WARN);
   // Clear stored WiFi credentials
   prefs.begin("wifi", false);
   prefs.clear();
   prefs.end();
 
+  // Clear stored display settings
+  prefs.begin("display", false);
+  prefs.clear();
+  prefs.end();
   // Optionally, reset other settings or configurations here
 
   // Restart the device
+  sendLog("Preferences cleared, rebooting...", WARN);
   ESP.restart();
 }
 
-void display(const struct LEDstruct led) {
-  analogWrite(REDPIN, led.redBrightness);
-  analogWrite(BLUEPIN, led.blueBrightness);
-  analogWrite(GREENPIN, led.greenBrightness);
-  analogWrite(WHITEPIN, led.whiteBrightness);
-}
-
-void setLEDColors(uint8_t red, uint8_t blue, uint8_t green, uint8_t white) {
-    time_t now;
-    time(&now);
-    //unsigned long ms = now;
-    sendLog("Epoch: " + String(now), VERBOSE); // Adjust for your timezone if needed
-
-    //unsigned long s  = now / 1000UL;            // convert to seconds
-    unsigned long secsToday = now % 86400UL;     // seconds since last UTC midnight
-    int hour = secsToday / 3600UL;             // integer 0–23
-    sendLog("Hour (UTC): " + String(hour), VERBOSE); // Adjust for your timezone if needed
-    // Adjust hour for your timezone, e.g., PDT is UTC-7
-    if(hour - 7 < 0) hour += 24; // Adjust for your timezone if needed
-    sendLog("Hour (PDT): " + String(hour - 7), VERBOSE); // Adjust for your timezone if needed
-    
-
-  if (hour >= 7 && hour < 20) {
-    // Daytime: Set colors to bright
-    colors.redBrightness = red;
-    colors.blueBrightness = blue;
-    colors.greenBrightness = green;
-    colors.whiteBrightness = white;
-  } else {
-    // Nighttime: Dim the colors
-    colors.redBrightness = red / 2;
-    colors.blueBrightness = blue / 2;
-    colors.greenBrightness = green / 2;
-    colors.whiteBrightness = white / 2;
-  }
-  display(colors);
-  }
 
 String getMacAddress(){
   uint8_t baseMac[6];
@@ -558,25 +584,16 @@ void sendLog(const String& log, int msgLevel) {
 
 void syncNTP() {
   // Initialize and get the time
-  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-  struct tm timeinfo;
+  // Set up NTP with timezone support
+  configTzTime(timeZone, ntpServer); // timezone is a TZ string, e.g., "PST8PDT,M3.2.0,M11.1.0"
   if (!getLocalTime(&timeinfo)) {
-    Serial.println("Failed to obtain time");
+    sendLog("Failed to obtain time");
     return;
+  }else{
+    // timeinfo.tm_hour, timeinfo.tm_min, etc. now reflect local time (with offset applied)
+    sendLog("NTP Sync completed - " + String(timeinfo.tm_hour) + ":" + String(timeinfo.tm_min) + ":" + String(timeinfo.tm_sec), VERBOSE); // Adjust for your timezone if needed
   }
-}  
 
-void calcCurrentTimeMillis() {
-  // Calculate the boot time in milliseconds since the epoch
-  time_t now;
-  time(&now);
-  bootTimeMillis = now * 1000UL - millis();
-}
-
-void printCurrentTimeMillis() {
-  unsigned long currentMillis = millis();
-  unsigned long currentTimeMillis = (bootTimeMillis + currentMillis);
-  sendLog("Current time in milliseconds since epoch: "+ String(currentTimeMillis), DEBUG);
 }
 
 void removeColons(char* str) {
@@ -588,6 +605,67 @@ void removeColons(char* str) {
     }
   }
   str[j] = '\0'; // Null-terminate the modified string
+}
+
+
+//================================= Wifi Fucntions ===================================
+std::vector<NetworkInfo> scanNetworks() {
+  WiFi.mode(WIFI_STA); // Ensure we're in station mode
+  delay(100);          // Allow mode switch to settle
+  std::vector<NetworkInfo> networks;
+  int n = WiFi.scanNetworks();
+  for (int i = 0; i < n; ++i) {
+    networks.push_back({WiFi.SSID(i), WiFi.RSSI(i)});
+  }
+  // Sort by RSSI (signal strength), descending
+  std::sort(networks.begin(), networks.end(), [](const NetworkInfo& a, const NetworkInfo& b) {
+    return a.rssi > b.rssi;
+  });
+  // Remove duplicates (same SSID)
+  std::vector<NetworkInfo> uniqueNetworks;
+  for (const auto& net : networks) {
+    bool exists = false;
+    for (const auto& u : uniqueNetworks) {
+      if (u.ssid == net.ssid) {
+        exists = true;
+        break;
+      }
+    }
+    if (!exists && net.ssid.length() > 0) uniqueNetworks.push_back(net);
+    if (uniqueNetworks.size() >= 10) break;
+  }
+  return uniqueNetworks;
+}
+
+void startProvisioningAP() {
+    WiFi.mode(WIFI_AP); // Set WiFi mode to Access Point
+    // Get device ID (MAC address without colons)
+    String mac = getMacAddress();
+    mac.replace(":", "");
+    String suffix = mac.substring(mac.length() - 4); // last 4 characters
+    String apName = "fungers-" + suffix;
+
+    WiFi.softAPConfig(apIP, gateway, subnet);
+
+    // AP SSID will be "fungers-xxxx"
+    WiFi.softAP(apName.c_str());
+    //ip = WiFi.softAPIP();
+    Serial.printf("Provisioning AP started. Connect to http://%s (SSID: %s)\n", apIP.toString().c_str(), apName.c_str());
+
+    dnsServer.start(53, "*", apIP); // Start DNS server to redirect all requests to the AP IP
+
+    // Setup HTTP routes required to host the captive portal
+    server.on("/", HTTP_GET, handleRoot);
+    server.on("/save", HTTP_POST, handleSave);
+    // Handle common captive portal URLs
+    server.on("/generate_204", HTTP_GET, handleRoot); // Android
+    server.on("/fwlink", HTTP_GET, handleRoot);       // Windows
+    server.on("/hotspot-detect.html", HTTP_GET, handleRoot); // Apple
+    server.on("/ncsi.txt", HTTP_GET, handleRoot);     // Windows  
+    // Catch-all for any other requests
+    server.onNotFound(handleNotFound);
+
+    server.begin();
 }
 
 // Handle root path: serve the form
@@ -757,65 +835,6 @@ void handleSave() {
   }
 }
 
-std::vector<NetworkInfo> scanNetworks() {
-  WiFi.mode(WIFI_STA); // Ensure we're in station mode
-  delay(100);          // Allow mode switch to settle
-  std::vector<NetworkInfo> networks;
-  int n = WiFi.scanNetworks();
-  for (int i = 0; i < n; ++i) {
-    networks.push_back({WiFi.SSID(i), WiFi.RSSI(i)});
-  }
-  // Sort by RSSI (signal strength), descending
-  std::sort(networks.begin(), networks.end(), [](const NetworkInfo& a, const NetworkInfo& b) {
-    return a.rssi > b.rssi;
-  });
-  // Remove duplicates (same SSID)
-  std::vector<NetworkInfo> uniqueNetworks;
-  for (const auto& net : networks) {
-    bool exists = false;
-    for (const auto& u : uniqueNetworks) {
-      if (u.ssid == net.ssid) {
-        exists = true;
-        break;
-      }
-    }
-    if (!exists && net.ssid.length() > 0) uniqueNetworks.push_back(net);
-    if (uniqueNetworks.size() >= 10) break;
-  }
-  return uniqueNetworks;
-}
-
-void startProvisioningAP() {
-    WiFi.mode(WIFI_AP); // Set WiFi mode to Access Point
-    // Get device ID (MAC address without colons)
-    String mac = getMacAddress();
-    mac.replace(":", "");
-    String suffix = mac.substring(mac.length() - 4); // last 4 characters
-    String apName = "fungers-" + suffix;
-
-    WiFi.softAPConfig(apIP, gateway, subnet);
-
-    // AP SSID will be "fungers-xxxx"
-    WiFi.softAP(apName.c_str());
-    //ip = WiFi.softAPIP();
-    Serial.printf("Provisioning AP started. Connect to http://%s (SSID: %s)\n", apIP.toString().c_str(), apName.c_str());
-
-    dnsServer.start(53, "*", apIP); // Start DNS server to redirect all requests to the AP IP
-
-    // Setup HTTP routes required to host the captive portal
-    server.on("/", HTTP_GET, handleRoot);
-    server.on("/save", HTTP_POST, handleSave);
-    // Handle common captive portal URLs
-    server.on("/generate_204", HTTP_GET, handleRoot); // Android
-    server.on("/fwlink", HTTP_GET, handleRoot);       // Windows
-    server.on("/hotspot-detect.html", HTTP_GET, handleRoot); // Apple
-    server.on("/ncsi.txt", HTTP_GET, handleRoot);     // Windows  
-    // Catch-all for any other requests
-    server.onNotFound(handleNotFound);
-
-    server.begin();
-}
-
 void handleNotFound() {
   // (optional) debug
   Serial.printf("NotFound: %s\n", server.uri().c_str());
@@ -827,6 +846,7 @@ void handleNotFound() {
   server.send(302, "text/html", provisioningPage); // or your config HTML
 }
 
+//================================ Display Functions ==================================
 int interpolate(int start, int end, float t) {
   return start + (end - start) * t;
 }
@@ -840,3 +860,39 @@ float cubicEaseInOut(float t) {
     return 0.5 * f * f * f + 1;
   }
 }
+
+void display(const struct LEDstruct led) {
+  analogWrite(REDPIN, led.redBrightness);
+  analogWrite(BLUEPIN, led.blueBrightness);
+  analogWrite(GREENPIN, led.greenBrightness);
+  analogWrite(WHITEPIN, led.whiteBrightness);
+}
+
+void setLEDColors(uint8_t red, uint8_t blue, uint8_t green, uint8_t white) {
+  sendLog(String(timeinfo.tm_hour) + ":" + String(timeinfo.tm_min) + ":" + String(timeinfo.tm_sec), VERBOSE); // Adjust for your timezone if needed
+  int hour = timeinfo.tm_hour;
+
+  if (hour >= colors.nightEnd && hour < colors.nightStart ) {
+    // Daytime: Set colors to bright
+    colors.redBrightness = constrain(red, 0 , (255*colors.maxBrightness)/100);
+    colors.blueBrightness = constrain(blue, 0 , (255*colors.maxBrightness)/100);
+    colors.greenBrightness = constrain(green, 0 , (255*colors.maxBrightness)/100);
+    colors.whiteBrightness = constrain(white, 0 , (255*colors.maxBrightness)/100);
+    sendLog("Setting daytime LED colors: R=" + String(colors.redBrightness) + 
+            ", G=" + String(colors.greenBrightness) + 
+            ", B=" + String(colors.blueBrightness) + 
+            ", W=" + String(colors.whiteBrightness), VERBOSE);
+  } else {
+    // Nighttime: Dim the colors
+    colors.redBrightness = constrain((red * colors.nightBrightness) / 100, 0, (255*colors.maxBrightness)/100);
+    colors.blueBrightness = constrain((blue * colors.nightBrightness) / 100, 0, (255*colors.maxBrightness)/100);
+    colors.greenBrightness = constrain((green * colors.nightBrightness) / 100, 0, (255*colors.maxBrightness)/100);
+    colors.whiteBrightness = constrain((white * colors.nightBrightness) / 100, 0, (255*colors.maxBrightness)/100);
+    sendLog("Setting Nighttime LED colors: R=" + String(colors.redBrightness) + 
+          ", G=" + String(colors.greenBrightness) + 
+          ", B=" + String(colors.blueBrightness) + 
+          ", W=" + String(colors.whiteBrightness), VERBOSE);
+  }
+  
+  display(colors);
+  }
