@@ -62,7 +62,14 @@ void setup()
   colors.nightBrightness = prefs.getUInt("nightBrightness", 50); // Get max brightness from preferences, default to 255
   colors.nightEnd = prefs.getUChar("nightEnd", 7); // Get night end hour from preferences, default to 7
   colors.nightStart = prefs.getUChar("nightStart", 20); // Get night start hour from preferences, default to 20
+  
+  uint8_t playerH_temp = prefs.getUInt("playerH", 38); 
+  uint8_t playerS_temp = prefs.getUInt("playerS", 63); 
+  uint8_t playerV_temp = prefs.getUInt("playerV", 98); 
+  
   prefs.end();
+
+
   //Configure the interupt for the cap touch sensor
   pinMode(4, INPUT);
   attachInterrupt(digitalPinToInterrupt(4), touchEvent, RISING);
@@ -73,7 +80,7 @@ void setup()
   //prefs.putString("ssid", "fringeclass");
   //prefs.clear();
   prefs.end();
-  
+
   
   // Try to read stored credentials
   prefs.begin("wifi", true);
@@ -94,6 +101,22 @@ void setup()
     strcpy(deviceID, tmpMAC.c_str());
     removeColons(deviceID);
 
+  if (deviceID == "F4650B4908DC"){
+    playerH = 211;
+    playerS = 63;
+    playerV = 98;
+  }else if (deviceID == "F4650B4A4758"){
+    playerH = 314;
+    playerS = 63;
+    playerV = 98;
+  } else {
+    playerH = 38; // Default values if deviceID does not match known IDs
+    playerS = 63;
+    playerV = 98;
+  }
+
+  
+
     //Build the MQTT channel for this specific device, used to post status msgs, logs, targeted OTAs, etc.
     String tmpdeviceChannel = String("funger/device/") + String(deviceID); 
     strcpy (deviceChannel,tmpdeviceChannel.c_str());
@@ -110,7 +133,7 @@ void setup()
 
     // Optional functionalities of EspMQTTClient
     //client->enableDebuggingMessages(); // Enable debugging messages sent to serial output
-    client->enableLastWillMessage(deviceChannel, "{\"event\":\"Disconnected\"");  // You can activate the retain flag by setting the third parameter to true
+    client->enableLastWillMessage(deviceChannel, "{\"event\":\"Disconnected\"}");  // You can activate the retain flag by setting the third parameter to true
     client->setKeepAlive(15); // Set the keep alive interval in seconds, default is 15 seconds
 
     unsigned long elapsed = millis() - startTime;    
@@ -142,7 +165,7 @@ void setup()
     startTime = 0; // Reset start time after connection
     sendLog("Connected to WiFi: " + ssid, INFO);
     syncNTP();
-    calcCurrentTimeMillis(); 
+    calcBootEpochMillis(); 
     printCurrentTimeMillis();
 
     //Zero out the system time, we will use this time to compute who the winner is on a MQTT touch event
@@ -161,10 +184,30 @@ void setup()
   startProvisioningAP();
 }
 
+/**
+ * @brief Main loop function for device operation.
+ *
+ * Handles device behavior based on current WiFi mode:
+ * 
+ * - In provisioning mode (WIFI_AP):
+ *   - Processes captive-portal DNS and HTTP server requests.
+ *   - Animates LED color transitions between blue and yellow using cubic easing.
+ *   - Alternates animation direction after a set transition duration.
+ *
+ * - In normal operation mode (WIFI_STA or WIFI_AP_STA):
+ *   - Maintains WiFi client connection.
+ *   - If MQTT is connected:
+ *     - Handles touch button events, sending logs and publishing touch events via MQTT.
+ *     - Handles incoming events, compares event times, updates LED color (green/red), and publishes sync events.
+ *     - (TODO) Implements breathing white LED effect when in last place.
+ *   - If MQTT is not connected:
+ *     - Animates LED color transitions between magenta and dim magenta to indicate offline status.
+ *     - (TODO) Change offline indicator to a breathing effect.
+ *
+ * Uses helper functions for color interpolation, easing, and LED color setting.
+ */
 void loop()
-{
-
-  // If in provisioning mode, handle incoming HTTP clients
+{  // If in provisioning mode, handle incoming HTTP clients
   if (WiFi.getMode() == WIFI_AP) {
     dnsServer.processNextRequest();  // handle captive-portal DNS
     server.handleClient();
@@ -201,33 +244,48 @@ void loop()
           sendLog(String("touch Event at delta of: " + String(touchBtn.delta)), DEBUG);
           //set the color to green, this is the color we transition to when a touch event is detected
           //TODO #3 make the color transition to green when a touch event is detected
-          setLEDColors(0, 0, 255, 0); 
+          hsi2rgbw(109, 63, 98); // Convert HSI to RGBW for green
+          playerPosition = FIRST; //set the player position to first when a touch event is detected
 
           // Publish the events for other devices to see
           StaticJsonDocument<200> jsonTxBuffer;
           jsonTxBuffer["event"] = "touch";
           jsonTxBuffer["device"] = deviceID; 
           jsonTxBuffer["delta"] = touchBtn.delta;
-          time_t now;
-          time(&now);
-          jsonTxBuffer["time"] = now; //send the timestamp of the touch event
-          sendJSON(jsonTxBuffer, "funger/events/"); 
-        }
+          jsonTxBuffer["time"] =  getCurrentTimeMillis(); //send the timestamp of the touch event
+          jsonTxBuffer["H"] =  playerH; //send the timestamp of the touch event
+          jsonTxBuffer["S"] =  playerS; //send the timestamp of the touch event
+          jsonTxBuffer["V"] =  playerV; //send the timestamp of the touch event
 
+          sendJSON(jsonTxBuffer, "funger/events/"); 
+          sendJSON(jsonTxBuffer, deviceChannel); //send the touch event to the device channel
+        }
         touchBtn.pressed = false;
       }
 
-      if (event.newEvent) {
+      else if (event.newEvent) {
         //deltaTime = event.eventTime - syncTime;
+        sendLog("Delta between touch and sync: " + String(touchBtn.touchTime - syncTime), DEBUG);
 
-        Serial.println(touchBtn.touchTime - syncTime);
         if (event.eventTime < (touchBtn.touchTime - syncTime)){
           sendLog(String("they win\n Event occured at: " + String(event.eventTime) + "\n Last touch Event at: " + String(touchBtn.delta)), DEBUG);
-          
+          if (playerPosition == OTHER){
+            sendLog("Player position was other, setting to ENTICE", INFO);
+            playerPosition = ENTICE; //set the player position to last when a touch event is detected
+            if (enticementCount < 64){
+              enticementCount +=6; //increment the enticement count by 6
+            }
+          } else if (playerPosition == SECOND){
+            sendLog("Player position was second, setting to third/other", INFO);
+            playerPosition = OTHER; //set the player position to first when a touch event is detected
+          } else if (playerPosition == FIRST){
+            sendLog("Player position was first, setting to second", INFO);
+            playerPosition = SECOND; //set the player position to last when a touch event is detected
+          }  
 
           //the event happened sooner than our last touch event, filters out delayed messages?? thats what I am telling myself.
           //set the color to red and sync the time
-          setLEDColors(0, 0, 0, 255); 
+          //setLEDColors(0, 0, 0, 255); 
 
           StaticJsonDocument<200> jsonTxBuffer;
           jsonTxBuffer["event"] = "sync";
@@ -236,6 +294,8 @@ void loop()
         }
         else if (event.eventTime >= (touchBtn.touchTime - syncTime)){
           sendLog(String("they lose\n Event occured at: " + String(event.eventTime) + "\n Last touch Event at: " + String(touchBtn.delta)), DEBUG);
+          sendLog("Player position was " + String(playerPosition) + ", setting to first", INFO);
+          playerPosition = FIRST; //set the player position to first when a touch event is detecte
 
           StaticJsonDocument<200> jsonTxBuffer;
           jsonTxBuffer["event"] = "sync";
@@ -248,6 +308,66 @@ void loop()
       }
       
       else{
+
+        if (playerPosition == FIRST){
+          //set the color to green, this is the color we transition to when a touch event is detected
+          hsi2rgbw(109, 63, 98); // Convert HSI to RGBW for green
+          //setLEDColors(0, 0, 255, 0); // Set the color to green when in first place
+          delay(1); // Small delay to allow for smoother transitions
+        }
+        else if (playerPosition == SECOND){
+          //set the color to yellow, this is the color we transition to when a touch event is detected
+          hsi2rgbw(event.H, event.S, event.I);
+          sendLog("Setting LED color to oponents color with HSI: " + String(event.H) + ", " + String(event.S) + ", " + String(event.I), DEBUG);
+          //setLEDColors(255, 0, 200, 0); // Set the color to yellow when in second place
+          delay(1); // Small delay to allow for smoother transitions
+        }
+        else if (playerPosition == OTHER){
+          //set the color to blue, this is the color we transition to when a touch event is detected
+          //setLEDColors(0, 0, 0, 255); // Set the color to blue when in third place
+          //delay(1); // Small delay to allow for smoother transitions
+          /**/
+            unsigned long elapsed = millis() - startTime;
+            bool transitionComplete = false;
+
+            // Loop the transition
+            if (elapsed > 1000) {
+              startTime = millis();
+              transitionComplete = true; // Indicate that the transition is complete
+            }
+            float t = (float)elapsed / 1000;
+            float easedT = cubicEaseInOut(t);
+            if (!transitionComplete) {
+              // Cubic ease from whiteTransitionValue to 255
+              uint8_t w = interpolate(whiteTransitionValue, 255, easedT);
+              setLEDColors(0, 0, 0, w); 
+              delay(1); // Small delay to allow for smoother transitions
+            } else(whiteTransitionValue = 255); // Reset whiteTransitionValue to 255 after transition completes
+
+        } 
+        else if (playerPosition == ENTICE){
+          unsigned long elapsed = millis() - startTime;
+          // Loop the transition
+          if (elapsed > 1000) {
+            startTime = millis();
+            forward = !forward; // alternate direction
+            if (enticementCount > 0){
+              enticementCount --; //decrement the enticement count
+            }
+            return; 
+          }
+            float t = (float)elapsed / 1000;
+            float easedT = cubicEaseInOut(t);
+
+            int w = interpolate(255, 0, forward ? easedT : 1.0 - easedT);
+            setLEDColors(0, 0, 0, w); 
+            delay(1); // Small delay to allow for smoother transitions
+
+            if (enticementCount <= 0){
+              playerPosition = OTHER; //set the player position to other when enticement count reaches 0
+              whiteTransitionValue = w;
+            }
+        }
       //TODO #16 when in last place make it breathe white
       //setLEDColors(0,0,0,255); // Set the color to white when connected to MQTT
       //display(colors);
@@ -261,13 +381,13 @@ void loop()
       //TODO Change offline indicator to breatheing
       unsigned long elapsed = millis() - startTime;
       // Loop the transition
-      if (elapsed > 125) {
+      if (elapsed > 1000) {
         startTime = millis();
         forward = !forward; // alternate direction
         //return;
       }
 
-      float t = (float)elapsed / 125;
+      float t = (float)elapsed / 1000;
       float easedT = cubicEaseInOut(t);
 
       // Interpolate between magenta (255, 0, 255) and dim magenta (127, 0, 127)
@@ -275,11 +395,10 @@ void loop()
       int g = interpolate(0, 200, forward ? easedT : 1.0 - easedT);
       int b = interpolate(255, 127, forward ? easedT : 1.0 - easedT);
       setLEDColors(r, b, g, 0); 
+      delay(1); // Small delay to allow for smoother transitions
       //setLEDColors(128, 128, 0, 0); 
     }
-
   }
-  
 }
 
 void IRAM_ATTR touchEvent(){
@@ -295,21 +414,38 @@ void IRAM_ATTR touchEvent(){
 
 void synchronize(){
   syncNTP();
-  // Set the syncTime to the current millis, this will be used to calculate the delta
+  // after syncing NTP we save the current millis() 
   syncTime = millis();
 }
 
-void calcCurrentTimeMillis() {
+void calcBootEpochMillis() {
   // Calculate the boot time in milliseconds since the epoch
-  time_t now;
-  time(&now);
-  bootTimeMillis = now * 1000UL - millis();
+  time(&bootEpoch);
+  bootMillis = millis(); // should be close to 0 at boot
+  bootEpochMillis = bootEpoch * 1000UL + millis();
+  
 }
 
 void printCurrentTimeMillis() {
-  unsigned long currentMillis = millis();
-  unsigned long currentTimeMillis = (bootTimeMillis + currentMillis);
+  unsigned long long currentMillis = millis();
+  // Calculate the current time in milliseconds since epoch
+  unsigned long long currentTimeMillis = (bootEpochMillis + currentMillis);
   sendLog("Current time in milliseconds since epoch: "+ String(currentTimeMillis), DEBUG);
+
+}
+
+unsigned long long getCurrentTimeMillis() {
+  time_t now;
+  time(&now); // Get the current time in seconds since epoch
+  unsigned long long currentMillis = ((unsigned long long)now * 1000UL) + ((millis() - syncTime) % 1000); // Convert to milliseconds
+  sendLog("linux epoch: " + String(now), VERBOSE);
+  sendLog("Current time in milliseconds since epoch: " + String((unsigned long long)now * 1000UL), VERBOSE);
+  sendLog("Current milliseconds since sync: " + String((millis() - syncTime) % 1000), VERBOSE);
+  sendLog("Current milliseconds timestamp: " + String(currentMillis), DEBUG);
+
+  //unsigned long nowMillis = millis();
+  //unsigned long long epochMillis = (unsigned long long)bootEpoch * 1000ULL + (nowMillis - bootMillis);
+  return currentMillis;
 }
 
 void recieveEvents(const String& msg){
@@ -386,6 +522,9 @@ void recieveEvents(const String& msg){
       event.newEvent = true;
       event.eventTime = jsonRxBuffer["delta"];
       event.deviceID = jsonRxBuffer["device"];
+      event.H = jsonRxBuffer["H"];
+      event.S = jsonRxBuffer["S"];
+      event.I = jsonRxBuffer["V"];
     }
     else{
       sendLog("this was our event",DEBUG);
@@ -406,6 +545,46 @@ void recieveEvents(const String& msg){
     sendLog("unknown JSON event type"), WARN;
     //Serial.print(jsonRxBuffer);
   }
+}
+
+void hsi2rgbw(float H, float S, float I) {
+  int r, g, b, w;
+  float cos_h, cos_1047_h;
+  H = fmod(H,360); // cycle H around to 0-360 degrees
+  H = 3.14159*H/(float)180; // Convert to radians.
+  S = S>0?(S<1?S:1):0; // clamp S and I to interval [0,1]
+  I = I>0?(I<1?I:1):0;
+  
+  if(H < 2.09439) {
+    cos_h = cos(H);
+    cos_1047_h = cos(1.047196667-H);
+    r = S*255*I/3*(1+cos_h/cos_1047_h);
+    g = S*255*I/3*(1+(1-cos_h/cos_1047_h));
+    b = 0;
+    w = 255*(1-S)*I;
+  } else if(H < 4.188787) {
+    H = H - 2.09439;
+    cos_h = cos(H);
+    cos_1047_h = cos(1.047196667-H);
+    g = S*255*I/3*(1+cos_h/cos_1047_h);
+    b = S*255*I/3*(1+(1-cos_h/cos_1047_h));
+    r = 0;
+    w = 255*(1-S)*I;
+  } else {
+    H = H - 4.188787;
+    cos_h = cos(H);
+    cos_1047_h = cos(1.047196667-H);
+    b = S*255*I/3*(1+cos_h/cos_1047_h);
+    r = S*255*I/3*(1+(1-cos_h/cos_1047_h));
+    g = 0;
+    w = 255*(1-S)*I;
+  }
+  
+  colors.redBrightness=r;
+  colors.greenBrightness=g;
+  colors.blueBrightness=b;
+  colors.whiteBrightness=w;
+  display(colors);
 }
 
 void factoryReset() {

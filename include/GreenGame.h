@@ -14,6 +14,7 @@
 #include <DNSServer.h>
 #include <vector>
 #include <algorithm>
+#include "math.h"
 
 
 // Global constants and variables
@@ -33,9 +34,10 @@
 #define EVENT_OTA 4
 #define EVENT_TOUCH 6
 
-#define FIRST 1;
-#define SECOND 2;
-#define OTHER 3;
+#define FIRST 1
+#define SECOND 2
+#define OTHER 3
+#define ENTICE 4
 
 #define logLevelSerial  DEBUG // Set the default log level
 #define logLevelMQTT  INFO // Set the default MQTT log level
@@ -45,6 +47,9 @@
 #define  greenLEDs 2
 #define  whiteLEDs 3
 #define Logging "remote"
+
+
+#define DEG_TO_RAD(X) (M_PI*(X)/180)
 
 const int REDPIN = 16;
 const int GREENPIN = 32;//17
@@ -62,6 +67,17 @@ uint8_t debouceTime = 50;
 
 String options = "";
 
+int playerPosition = 3; // Player position in the game
+uint8_t enticementCount = 0; 
+uint8_t whiteTransitionValue = 0;
+uint8_t playerH = 38; 
+uint8_t playerS = 63; 
+uint8_t playerV = 98;
+
+uint8_t opponentrH; 
+uint8_t opponentS; 
+uint8_t opponentV; // Opponent's color values
+
 
 //Device ID stuff
 uint32_t macLow;
@@ -78,8 +94,9 @@ const char* ntpServer = "pool.ntp.org";
 const long gmtOffset_sec = -28800; // Adjust for your timezone, e.g., PST (UTC-8)
 // Daylight offset in seconds (e.g., for daylight saving time: 3600)
 const int daylightOffset_sec = -25200; // Adjust for your timezone, e.g., -25200 for PDT (UTC-7)
-unsigned long bootTimeMillis;
-
+unsigned long long bootEpochMillis;
+unsigned long bootMillis;
+time_t bootEpoch;
 //static 
 
 //===================================== Structure Def ============================================
@@ -99,12 +116,21 @@ struct LEDstruct {
   uint8_t nightBrightness = 100; // Night mode brightness percentage (0-100)
   uint8_t nightEnd = 7; // Hour when night mode ends (0-23)
   uint8_t nightStart = 20; // Hour when night mode starts (0-
+  uint8_t redTarget = 0; // Target red brightness
+  uint8_t greenTarget = 0; // Target green brightness
+  uint8_t blueTarget = 0; // Target blue brightness
+  uint8_t whiteTarget = 0; // Target white brightness
 };
+
 
 struct Event {
   bool newEvent = false;
   unsigned long eventTime = 0;
   uint64_t deviceID = 0;
+  uint16_t H = 0; // Hue value for color
+  uint16_t S = 0; // Saturation value for color
+  uint16_t I = 0; // Intensity value for color
+
 };
 
 struct NetworkInfo {
@@ -142,7 +168,7 @@ char MQTTp[] = MQTT_PASSWORD;
 char mqttuser[] = "green1green1green1"; 
 char deviceID[18];
 char deviceChannel[40];    
-char FW_Version[] = "1.0.7";
+char FW_Version[] = "1.0.8";
 char HW_Version[]  = "1";
 
 void IRAM_ATTR touchEvent(void);
@@ -152,7 +178,7 @@ void sendJSON(const JsonDocument&, const char*);
 bool fetchOTA(const String& HOST, bool persist = true);
 void syncNTP();
 void colorBars();
-void calcCurrentTimeMillis();
+void calcBootEpochMillis();
 void printCurrentTimeMillis();
 void removeColons(char*);
 void startProvisioningAP();
@@ -166,6 +192,8 @@ void factoryReset();
 void sendLog(const String& log, int msgLevel = INFO);
 String getMacAddress();
 std::vector<NetworkInfo> scanNetworks();
+unsigned long long getCurrentTimeMillis();
+void hsi2rgbw(float H, float S, float I);
 
 // HTML page served for Wi-Fi provisioning
 
