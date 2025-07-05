@@ -5,3 +5,4 @@
 .vscode/ipch
 include/secrets.h
 scripts/upload_to_server.py
+node_modules

@@ -68,11 +68,12 @@ uint8_t debouceTime = 50;
 String options = "";
 
 int playerPosition = 3; // Player position in the game
+int opponentPosition = 3; // Opponent position in the game
 uint8_t enticementCount = 0; 
 uint8_t whiteTransitionValue = 0;
-uint8_t playerH = 38; 
-uint8_t playerS = 63; 
-uint8_t playerV = 98;
+uint16_t playerH = 38; 
+uint16_t playerS = 63; 
+uint16_t playerV = 98;
 
 uint8_t opponentrH; 
 uint8_t opponentS; 
@@ -130,6 +131,8 @@ struct Event {
   uint16_t H = 0; // Hue value for color
   uint16_t S = 0; // Saturation value for color
   uint16_t I = 0; // Intensity value for color
+  u8_t position = OTHER; // Type of event (e.g., button press, MQTT message)
+  unsigned long long time = 0; // Timestamp in milliseconds since epoch
 
 };
 
@@ -168,7 +171,7 @@ char MQTTp[] = MQTT_PASSWORD;
 char mqttuser[] = "green1green1green1"; 
 char deviceID[18];
 char deviceChannel[40];    
-char FW_Version[] = "1.0.8";
+char FW_Version[] = "1.1.0";
 char HW_Version[]  = "1";
 
 void IRAM_ATTR touchEvent(void);

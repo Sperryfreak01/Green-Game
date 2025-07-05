@@ -101,19 +101,23 @@ void setup()
     strcpy(deviceID, tmpMAC.c_str());
     removeColons(deviceID);
 
-  if (deviceID == "F4650B4908DC"){
+  if (strcmp(deviceID, "F4650B4908DC") == 0){
+    sendLog("Device ID matches F4650B4908DC, setting player colors accordingly." + String(deviceID), DEBUG);
     playerH = 211;
     playerS = 63;
     playerV = 98;
-  }else if (deviceID == "F4650B4A4758"){
-    playerH = 314;
-    playerS = 63;
-    playerV = 98;
-  } else {
+  }else if (strcmp(deviceID, "F4650B4A4758") == 0){
+    sendLog("Device ID matches F4650B4A4758, setting player colors accordingly." + String(deviceID), DEBUG);
     playerH = 38; // Default values if deviceID does not match known IDs
     playerS = 63;
     playerV = 98;
+  } else if (strcmp(deviceID, "F4650B4A0518") == 0) {
+    sendLog("Device ID matches F4650B4A0518, setting player colors accordingly." + String(deviceID), DEBUG);
+    playerH = 314;
+    playerS = 63;
+    playerV = 98;
   }
+  sendLog(String(deviceID), DEBUG);
 
   
 
@@ -133,7 +137,7 @@ void setup()
 
     // Optional functionalities of EspMQTTClient
     //client->enableDebuggingMessages(); // Enable debugging messages sent to serial output
-    client->enableLastWillMessage(deviceChannel, "{\"event\":\"Disconnected\"}");  // You can activate the retain flag by setting the third parameter to true
+    client->enableLastWillMessage(deviceChannel, ("{\"event\":\"Disconnected\",\"device\":\"" + String(deviceID) + "\"}").c_str());
     client->setKeepAlive(15); // Set the keep alive interval in seconds, default is 15 seconds
 
     unsigned long elapsed = millis() - startTime;    
@@ -245,7 +249,6 @@ void loop()
           //set the color to green, this is the color we transition to when a touch event is detected
           //TODO #3 make the color transition to green when a touch event is detected
           hsi2rgbw(109, 63, 98); // Convert HSI to RGBW for green
-          playerPosition = FIRST; //set the player position to first when a touch event is detected
 
           // Publish the events for other devices to see
           StaticJsonDocument<200> jsonTxBuffer;
@@ -256,18 +259,25 @@ void loop()
           jsonTxBuffer["H"] =  playerH; //send the timestamp of the touch event
           jsonTxBuffer["S"] =  playerS; //send the timestamp of the touch event
           jsonTxBuffer["V"] =  playerV; //send the timestamp of the touch event
-
+          jsonTxBuffer["position"] = playerPosition; //send the player position
           sendJSON(jsonTxBuffer, "funger/events/"); 
           sendJSON(jsonTxBuffer, deviceChannel); //send the touch event to the device channel
         }
+        playerPosition = FIRST; //set the player position to first when a touch event is detected
         touchBtn.pressed = false;
       }
 
       else if (event.newEvent) {
         //deltaTime = event.eventTime - syncTime;
-        sendLog("Delta between touch and sync: " + String(touchBtn.touchTime - syncTime), DEBUG);
-
-        if (event.eventTime < (touchBtn.touchTime - syncTime)){
+        if (event.time > 0){
+          unsigned long long localTime = getCurrentTimeMillis();
+          sendLog("our time is : " + String(localTime) + "Thier time is: " + String(event.time), DEBUG);
+          long long delta = localTime - event.time;
+          sendLog("timestamp delta is: " + String(delta), DEBUG);
+        }
+        sendLog("Delta between touch and sync: " + String(touchBtn.touchTime - syncTime), VERBOSE);
+        sendLog("opponent position is "+ String(event.position), DEBUG);
+        if (event.eventTime < (touchBtn.touchTime - syncTime) && event.position != FIRST){
           sendLog(String("they win\n Event occured at: " + String(event.eventTime) + "\n Last touch Event at: " + String(touchBtn.delta)), DEBUG);
           if (playerPosition == OTHER){
             sendLog("Player position was other, setting to ENTICE", INFO);
@@ -318,7 +328,7 @@ void loop()
         else if (playerPosition == SECOND){
           //set the color to yellow, this is the color we transition to when a touch event is detected
           hsi2rgbw(event.H, event.S, event.I);
-          sendLog("Setting LED color to oponents color with HSI: " + String(event.H) + ", " + String(event.S) + ", " + String(event.I), DEBUG);
+          //sendLog("Setting LED color to oponents color with HSI: " + String(event.H) + ", " + String(event.S) + ", " + String(event.I), DEBUG);
           //setLEDColors(255, 0, 200, 0); // Set the color to yellow when in second place
           delay(1); // Small delay to allow for smoother transitions
         }
@@ -522,9 +532,13 @@ void recieveEvents(const String& msg){
       event.newEvent = true;
       event.eventTime = jsonRxBuffer["delta"];
       event.deviceID = jsonRxBuffer["device"];
-      event.H = jsonRxBuffer["H"];
-      event.S = jsonRxBuffer["S"];
-      event.I = jsonRxBuffer["V"];
+      event.H = jsonRxBuffer["H"].as<u_int16_t>();
+      event.S = jsonRxBuffer["S"].as<u_int16_t>();
+      event.I = jsonRxBuffer["V"].as<u_int16_t>();
+      if (jsonRxBuffer.containsKey("time")) {
+        event.time = jsonRxBuffer["time"].as<unsigned long long>();
+      }
+      event.position = jsonRxBuffer["position"].as<u_int8_t>(); //set the opponent position to second when a touch event is detected
     }
     else{
       sendLog("this was our event",DEBUG);
@@ -606,7 +620,6 @@ void factoryReset() {
   ESP.restart();
 }
 
-
 String getMacAddress(){
   uint8_t baseMac[6];
   // Get MAC address for WiFi station
@@ -630,7 +643,7 @@ void sendJSON(const JsonDocument& json, const char* channel){
 void onConnectionEstablished(){
   // This function is called once everything is connected (Wifi and MQTT), is used to register callbacks for MQTT messages recieved
   // Subscribe to "mytopic/test" and display received message to Serial
-  client->subscribe("funger/events/", recieveEvents);
+  client->subscribe("funger/events/", recieveEvents); //TODO need to push later and add support for individual game channels to that not all funger devices exist in the same game space.  Plan is for the backend to tell the funger device what game channel it is a part of and then it subscribes to it. 
   client->subscribe("funger/device/"+ String(deviceID), recieveEvents);
   //client->subscribe(String("funger/OTA/" + String(deviceID)), fetchOTA);
 
