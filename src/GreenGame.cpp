@@ -8,10 +8,7 @@
 
 
 //===================================== Variable  Def ============================================
-// Global variables
-int totalLength;       //total size of firmware
-int currentLength = 0; //current size of written firmware
-
+// Global variables (OTA variables moved to OTAManager.cpp)
 
 // Duration of one full transition in milliseconds
 const unsigned long TRANSITION_DURATION = 3000;
@@ -387,13 +384,15 @@ void loop()
             float t = (float)elapsed / 1000;
             float easedT = cubicEaseInOut(t);
 
-            int w = interpolate(255, 0, forward ? easedT : 1.0 - easedT);
-            setLEDColors(0, 0, 0, w); 
+            int v = interpolate(100, 0, forward ? easedT : 1.0 - easedT);
+            hsi2rgbw(109, 0, v); // Convert HSI to RGBW for green
+            //int w = interpolate(255, 0, forward ? easedT : 1.0 - easedT);
+            //setLEDColors(0, 0, 0, w); 
             delay(1); // Small delay to allow for smoother transitions
 
             if (enticementCount <= 0){
               playerPosition = OTHER; //set the player position to other when enticement count reaches 0
-              whiteTransitionValue = w;
+              whiteTransitionValue = v;
             }
         }
       //TODO #16 when in last place make it breathe white
@@ -492,22 +491,7 @@ void recieveEvents(const String& msg){
     sendLog("event did not contain JSON: " + msg);
   }
   else if(jsonRxBuffer["event"] == "OTA"){
-    //Serial.println("got MQTT OTA event");
-    //serializeJson(jsonRxBuffer, Serial);
-    if (jsonRxBuffer.containsKey("url")) {
-      String otaUrl = jsonRxBuffer["url"].as<String>();
-      Serial.println("Received OTA event, fetching firmware from: " + otaUrl);
-      if (jsonRxBuffer.containsKey("persist")) {
-        bool persist = jsonRxBuffer["persist"].as<bool>();
-      //sendLog("Persist OTA: " + String(persist));
-      fetchOTA(otaUrl, persist);
-    } else {
-        sendLog("No persist flag provided, defaulting to true.");
-        fetchOTA(otaUrl);
-      }
-    } else {
-      sendLog("OTA event received but no URL provided.");
-    }
+    handleOTAEvent(jsonRxBuffer);
   }  
   else if(jsonRxBuffer["event"] == "connected"){
     return; //ignore connected events, we already know we are connected
@@ -595,6 +579,8 @@ void recieveEvents(const String& msg){
     //Serial.print(jsonRxBuffer);
   }
 }
+
+
 
 void hsi2rgbw(float H, float S, float I) {
   int r, g, b, w;
@@ -698,25 +684,6 @@ void onConnectionEstablished(){
   setLEDColors(0, 0, 0, 255); 
 }
 
-void updateFirmware(uint8_t *data, size_t len){
-  // Function to update firmware incrementally
-  // Buffer is declared to be 128 so chunks of 128 bytes
-  // from firmware is written to device until server closes
-  setLEDColors(127, 0, 0, 0); // Set the color to blue -> connected to wifi but not MQTT
-  display(colors);
-  Update.write(data, len);
-  currentLength += len;
-  // Print dots while waiting for update to finish
-  Serial.print('.');
-  // if current length of written firmware is not equal to total firmware size, repeat
-  if(currentLength != totalLength) return;
-  Update.end(true);
-  sendLog("\nUpdate Success, Total Size: " + String(currentLength) + "\nRebooting...\n", INFO);
-  
-  // Restart ESP32 to see changes 
-  ESP.restart();
-}
-
 uint8_t getHWversion() {
   // Function to get hardware version
   pinMode(HW_ADC,  OUTPUT);
@@ -734,80 +701,6 @@ uint8_t getHWversion() {
   }
 }
 
-
-bool fetchOTA(const String& url, bool persist) { //#TODO #3 add status reporting over MQTT
-  bool status = false;
-  String log;
-
-  // Check if the URL starts with "http"
-  if (!url.startsWith("http")) {
-    sendLog("OTA URL must start with http:// or https:// recieved: " + url, ERROR);
-    return false;
-  }
-  // Connect to external web server
-  sendLog("Starting OTA update from URL: " + url, INFO);
-
-
-  if (!persist) {
-    // Clear previous wifi credentials
-    prefs.begin("wifi", false);
-    prefs.clear();
-    prefs.end();
-  }
-
-  int resp = OTAclient.begin(url);
-  if (resp != 1) {
-    sendLog("OTAclient.begin() failed, return code: " + String(resp), ERROR);
-    OTAclient.end();
-    return false;
-  }
-  resp = OTAclient.GET();
-  sendLog("OTA file response: "+ String(resp), DEBUG);
-  // If file is reachable, start downloading
-  if(resp == 200){
-    // get length of document (is -1 when Server sends no Content-Length header)
-    totalLength = OTAclient.getSize();
-    // transfer to local variable
-    int len = totalLength;
-    // this is required to start firmware update process
-    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
-      sendLog("Update.begin() failed!", WARN);
-      OTAclient.end();
-      return false;
-    }
-    sendLog("FW Size: " + String(totalLength), DEBUG);
-    // create buffer for read
-    uint8_t buff[128] = { 0 };
-    // get tcp stream
-    WiFiClient * stream = OTAclient.getStreamPtr();
-    // read all data from server
-    sendLog("Updating firmware...", INFO);
-    while(OTAclient.connected() && (len > 0 || len == -1)) {
-      setLEDColors(255, 0, 0, 0); // Set the color to blue -> connected to wifi but not MQTT
-      display(colors);
-
-      // get available data size
-      size_t size = stream->available();
-      if(size) {
-
-        // read up to 128 byte
-        int c = stream->readBytes(buff, ((size > sizeof(buff)) ? sizeof(buff) : size));
-        // pass to function
-        updateFirmware(buff, c);
-        if(len > 0) {
-          len -= c;
-        }
-      }
-      delay(1);
-    }
-    status = true;
-  }else{
-    sendLog("Cannot download firmware file. Only HTTP response 200: OK is supported. Double check firmware location.", WARN);
-    status = false;
-  }
-  OTAclient.end();
-  return status;
-}
 
 void sendLog(const String& log, int msgLevel) {
   

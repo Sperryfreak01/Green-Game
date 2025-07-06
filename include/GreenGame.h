@@ -1,4 +1,3 @@
-
 #include <Arduino.h>
 #include "EspMQTTClient.h"
 #include "esp_system.h"
@@ -15,6 +14,8 @@
 #include <vector>
 #include <algorithm>
 #include "math.h"
+#include "SharedTypes.h"  // Include shared types
+#include "OTAManager.h"  // Include OTA module
 
 
 // Global constants and variables
@@ -111,24 +112,6 @@ struct Button {
   volatile bool pressed = false;
 };
 
-struct LEDstruct {
-  uint8_t redBrightness = 0;
-  uint8_t greenBrightness = 0;
-  uint8_t blueBrightness = 0;
-  uint8_t whiteBrightness = 0;
-  uint8_t maxBrightness = 100; // Max brightness percentage (0-100) 
-  uint8_t nightBrightness = 100; // Night mode brightness percentage (0-100)
-  uint8_t nightEnd = 7; // Hour when night mode ends (0-23)
-  uint8_t nightStart = 20; // Hour when night mode starts (0-
-  uint8_t redTarget = 0; // Target red brightness
-  uint8_t greenTarget = 0; // Target green brightness
-  uint8_t blueTarget = 0; // Target blue brightness
-  uint8_t whiteTarget = 0; // Target white brightness
-  bool override = 0; // Override normal color mode
-  
-};
-
-
 struct Event {
   bool newEvent = false;
   unsigned long eventTime = 0;
@@ -150,7 +133,6 @@ struct tm timeinfo;
 
 //=================================== End Structure Def ==========================================
 
-HTTPClient OTAclient;
 EspMQTTClient* client;
 WebServer server(80);
 DNSServer dnsServer; // DNS server for captive portal
@@ -183,7 +165,6 @@ void IRAM_ATTR touchEvent(void);
 void display(struct LEDstruct);
 void setLEDColors(uint8_t, uint8_t, uint8_t, uint8_t);
 void sendJSON(const JsonDocument&, const char*);
-bool fetchOTA(const String& HOST, bool persist = true);
 void syncNTP();
 void colorBars();
 void calcBootEpochMillis();
