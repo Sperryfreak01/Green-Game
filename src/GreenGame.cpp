@@ -49,13 +49,31 @@ void setup()
 
   // Initialize the LED pins
   pinMode(REDPIN,   OUTPUT);
-  digitalWrite(REDPIN, LOW);
+  if (getHWversion() == 1) {
+      digitalWrite(REDPIN, LOW);
+  } else {
+    digitalWrite(REDPIN, HIGH);
+  }
+
   pinMode(BLUEPIN,  OUTPUT);
-  digitalWrite(BLUEPIN, LOW);
+    if (getHWversion() == 1) {
+      digitalWrite(BLUEPIN, LOW);
+  } else {
+    digitalWrite(BLUEPIN, HIGH);
+  }
   pinMode(GREENPIN, OUTPUT);
-  digitalWrite(GREENPIN, LOW);
+    if (getHWversion() == 1) {
+      digitalWrite(GREENPIN, LOW);
+  } else {
+    digitalWrite(GREENPIN, HIGH);
+  }
+
   pinMode(WHITEPIN, OUTPUT);
-  digitalWrite(WHITEPIN, LOW);
+  if (getHWversion() == 1) {
+      digitalWrite(WHITEPIN, LOW);
+  } else {
+    digitalWrite(WHITEPIN, HIGH);
+  }
 
   prefs.begin("display", true);
   colors.maxBrightness = prefs.getUInt("maxBrightness", 100); // Get max brightness from preferences, default to 255
@@ -523,6 +541,23 @@ void recieveEvents(const String& msg){
       prefs.end();
       sendLog("Night mode end hour set to: " + String(colors.nightEnd), DEBUG);
     }
+    if (jsonRxBuffer.containsKey("RGBW_EN")) {
+      colors.override = jsonRxBuffer["RGBW_EN"].as<bool>();
+      sendLog("setting display override to: " + String(colors.override), DEBUG);
+    }
+    if (jsonRxBuffer.containsKey("R")) {
+      colors.redTarget = jsonRxBuffer["R"].as<u_int8_t>();
+      sendLog("setting red brightness to: " + String(colors.redTarget), DEBUG);
+    }   if (jsonRxBuffer.containsKey("G")) {
+      colors.greenTarget = jsonRxBuffer["G"].as<u_int8_t>();
+      sendLog("setting green brightness to: " + String(colors.greenTarget), DEBUG);
+    }   if (jsonRxBuffer.containsKey("B")) {
+      colors.blueTarget = jsonRxBuffer["B"].as<u_int8_t>();
+      sendLog("setting blue brightness to: " + String(colors.blueTarget), DEBUG);
+    }   if (jsonRxBuffer.containsKey("W")) {
+      colors.whiteTarget = jsonRxBuffer["W"].as<u_int8_t>();
+      sendLog("setting white brightness to: " + String(colors.whiteTarget), DEBUG);
+    }
   }
   else if(jsonRxBuffer["event"] == "touch"){
     //Serial.println(msg);
@@ -609,7 +644,7 @@ void factoryReset() {
   prefs.clear();
   prefs.end();
 
-  // Clear stored display settings
+  // Clear stored display setting
   prefs.begin("display", false);
   prefs.clear();
   prefs.end();
@@ -681,6 +716,24 @@ void updateFirmware(uint8_t *data, size_t len){
   // Restart ESP32 to see changes 
   ESP.restart();
 }
+
+uint8_t getHWversion() {
+  // Function to get hardware version
+  pinMode(HW_ADC,  OUTPUT);
+  //pinMode(HW_ADC_LOW,  INPUT_PULLDOWN);
+  pinMode(HW_ADC_HIGH,  INPUT_PULLDOWN);
+  digitalWrite(HW_ADC, HIGH); // Set the ADC pin high to read the hardware version
+
+  if(digitalRead(HW_ADC_HIGH) == LOW) {
+    sendLog("HW V1 Detected", DEBUG);
+    return 1; // Return hardware version 1
+  }
+    if(digitalRead(HW_ADC_HIGH) == HIGH) {
+    sendLog("HW V2 Detected", DEBUG);
+    return 2; // Return hardware version 2
+  }
+}
+
 
 bool fetchOTA(const String& url, bool persist) { //#TODO #3 add status reporting over MQTT
   bool status = false;
@@ -1054,10 +1107,20 @@ float cubicEaseInOut(float t) {
 }
 
 void display(const struct LEDstruct led) {
-  analogWrite(REDPIN, led.redBrightness);
-  analogWrite(BLUEPIN, led.blueBrightness);
-  analogWrite(GREENPIN, led.greenBrightness);
-  analogWrite(WHITEPIN, led.whiteBrightness);
+  if(led.override) {
+    //sendLog("LED override active. Using target values.", DEBUG);
+    analogWrite(REDPIN, led.redTarget);
+    analogWrite(BLUEPIN, led.blueTarget);
+    analogWrite(GREENPIN, led.greenTarget);
+    analogWrite(WHITEPIN, led.whiteTarget);
+    return;
+  } else {
+    //sendLog("LED override inactive. Using brightness values.", DEBUG);
+    analogWrite(REDPIN, led.redBrightness);
+    analogWrite(BLUEPIN, led.blueBrightness);
+    analogWrite(GREENPIN, led.greenBrightness);
+    analogWrite(WHITEPIN, led.whiteBrightness);
+  }
 }
 
 void setLEDColors(uint8_t red, uint8_t blue, uint8_t green, uint8_t white) {

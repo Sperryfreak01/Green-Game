@@ -55,6 +55,9 @@ const int REDPIN = 16;
 const int GREENPIN = 32;//17
 const int BLUEPIN = 17;//21;
 const int WHITEPIN = 21;//32;
+const int HW_ADC_LOW = 23; // GND side of HW ADC voltage devider
+const int HW_ADC_HIGH = 33; // Minimum ADC value for hardware
+const int HW_ADC = 34; // ADC pin for hardware version detectionc
 
 
 //Time related variables
@@ -121,6 +124,8 @@ struct LEDstruct {
   uint8_t greenTarget = 0; // Target green brightness
   uint8_t blueTarget = 0; // Target blue brightness
   uint8_t whiteTarget = 0; // Target white brightness
+  bool override = 0; // Override normal color mode
+  
 };
 
 
@@ -197,6 +202,8 @@ String getMacAddress();
 std::vector<NetworkInfo> scanNetworks();
 unsigned long long getCurrentTimeMillis();
 void hsi2rgbw(float H, float S, float I);
+uint8_t getHWversion();
+
 
 // HTML page served for Wi-Fi provisioning
 
