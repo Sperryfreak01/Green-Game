@@ -57,9 +57,9 @@ const int GREENPIN = 32;//17
 const int BLUEPIN = 17;//21;
 const int WHITEPIN = 21;//32;
 const int HW_ADC_LOW = 23; // GND side of HW ADC voltage devider
-const int HW_ADC_HIGH = 33; // Minimum ADC value for hardware
-const int HW_ADC = 34; // ADC pin for hardware version detectionc
-
+const int HW_ADC_HIGH = 34; // Minimum ADC value for hardware
+const int HW_ADC = 33; // ADC pin for hardware version detectionc
+uint8_t verHW = 0; // Hardware version, set in setup() based on ADC reading
 
 //Time related variables
 unsigned long startMillis;  
@@ -83,6 +83,7 @@ uint8_t opponentrH;
 uint8_t opponentS; 
 uint8_t opponentV; // Opponent's color values
 
+char lwtMsg[128]; // Last Will and Testament message for MQTT
 
 //Device ID stuff
 uint32_t macLow;
@@ -184,7 +185,7 @@ std::vector<NetworkInfo> scanNetworks();
 unsigned long long getCurrentTimeMillis();
 void hsi2rgbw(float H, float S, float I);
 uint8_t getHWversion();
-
+void sendDeviceStatus();
 
 // HTML page served for Wi-Fi provisioning
 

@@ -43,6 +43,8 @@ void setup()
 //setup all the LED control pin
 {
   startTime = millis();
+  verHW = getHWversion(); // Get hardware version
+  sendLog("Hardware version: " + String(verHW), DEBUG);
 
   // Initialize the LED pins
   pinMode(REDPIN,   OUTPUT);
@@ -138,8 +140,11 @@ void setup()
 
     //Build the MQTT channel for this specific device, used to post status msgs, logs, targeted OTAs, etc.
     String tmpdeviceChannel = String("funger/device/") + String(deviceID); 
-    strcpy (deviceChannel,tmpdeviceChannel.c_str());
+    strcpy(deviceChannel, tmpdeviceChannel.c_str());
 
+    snprintf(lwtMsg, sizeof(lwtMsg), "{\"event\":\"disconnect\",\"device\":\"%s\"}", deviceID);
+    sendLog("LWT Message: " + String(lwtMsg), DEBUG);
+    
     client = new EspMQTTClient(
       ssid.c_str(),         // TODO #1 Change to allow user to set wifi password
       pass.c_str(),
@@ -151,8 +156,9 @@ void setup()
     );
 
     // Optional functionalities of EspMQTTClient
-    //client->enableDebuggingMessages(); // Enable debugging messages sent to serial output
-    client->enableLastWillMessage(deviceChannel, ("{\"event\":\"Disconnected\",\"device\":\"" + String(deviceID) + "\"}").c_str());
+    // client->enableDebuggingMessages(); // Enable debugging messages sent to serial output
+    // Prepare the Last Will and Testament (LWT) message globally
+    client->enableLastWillMessage(deviceChannel, lwtMsg);
     client->setKeepAlive(15); // Set the keep alive interval in seconds, default is 15 seconds
 
     unsigned long elapsed = millis() - startTime;    
@@ -280,6 +286,7 @@ void loop()
         }
         playerPosition = FIRST; //set the player position to first when a touch event is detected
         touchBtn.pressed = false;
+        sendDeviceStatus();
       }
 
       else if (event.newEvent) {
@@ -332,7 +339,7 @@ void loop()
         event.newEvent = false;    
       }
       
-      else{
+      else{ //primary color display loop
 
         if (playerPosition == FIRST){
           //set the color to green, this is the color we transition to when a touch event is detected
@@ -348,8 +355,7 @@ void loop()
           delay(1); // Small delay to allow for smoother transitions
         }
         else if (playerPosition == OTHER){
-          //set the color to blue, this is the color we transition to when a touch event is detected
-          //setLEDColors(0, 0, 0, 255); // Set the color to blue when in third place
+          //setLEDColors(0, 0, 0, 255); // Set the color to white when in third place
           //delay(1); // Small delay to allow for smoother transitions
           /**/
             unsigned long elapsed = millis() - startTime;
@@ -384,15 +390,15 @@ void loop()
             float t = (float)elapsed / 1000;
             float easedT = cubicEaseInOut(t);
 
-            int v = interpolate(100, 0, forward ? easedT : 1.0 - easedT);
-            hsi2rgbw(109, 0, v); // Convert HSI to RGBW for green
-            //int w = interpolate(255, 0, forward ? easedT : 1.0 - easedT);
-            //setLEDColors(0, 0, 0, w); 
+            //int v = interpolate(100, 0, forward ? easedT : 1.0 - easedT);
+            //hsi2rgbw(109, 0, v); // Convert HSI to RGBW for green
+            int w = interpolate(255, 0, forward ? easedT : 1.0 - easedT);
+            setLEDColors(0, 0, 0, w); 
             delay(1); // Small delay to allow for smoother transitions
 
             if (enticementCount <= 0){
               playerPosition = OTHER; //set the player position to other when enticement count reaches 0
-              whiteTransitionValue = v;
+              whiteTransitionValue = w;
             }
         }
       //TODO #16 when in last place make it breathe white
@@ -426,6 +432,19 @@ void loop()
       //setLEDColors(128, 128, 0, 0); 
     }
   }
+}
+
+void sendDeviceStatus() {
+  StaticJsonDocument<200> jsonTxBuffer;
+  jsonTxBuffer["event"] = "status";
+  jsonTxBuffer["device"] = deviceID; 
+  jsonTxBuffer["H"] = playerH;
+  jsonTxBuffer["S"] = playerS;
+  jsonTxBuffer["V"] = playerV;
+  jsonTxBuffer["position"] = playerPosition; //send the player position
+  jsonTxBuffer["time"] = getCurrentTimeMillis(); //send the timestamp of the touch event
+  //sendJSON(jsonTxBuffer, "funger/events/"); 
+  sendJSON(jsonTxBuffer, (String(deviceChannel) + deviceID).c_str()); //send the status event to the device channel
 }
 
 void IRAM_ATTR touchEvent(){
@@ -496,6 +515,10 @@ void recieveEvents(const String& msg){
   else if(jsonRxBuffer["event"] == "connected"){
     return; //ignore connected events, we already know we are connected
   }
+  else if(jsonRxBuffer["event"] == "reboot"){
+    sendLog("rebooting device", INFO);
+    ESP.restart(); //reboot the device
+  }
   else if(jsonRxBuffer["event"] == "display"){
     if (jsonRxBuffer.containsKey("maxBrightness")) {
       colors.maxBrightness = jsonRxBuffer["maxBrightness"].as<u_int8_t>();
@@ -565,8 +588,10 @@ void recieveEvents(const String& msg){
     return;      
   }
   else if(jsonRxBuffer["event"] == "sync"){ //someone just  processed a wining event - everyone clear thier timers to sync up
-    sendLog("syncing time",DEBUG);   //will fire off everytime a player processes, this will not scale and will pump traffic
-    synchronize();
+    sendLog("sync event",DEBUG);   //will fire off everytime a player processes, this will not scale and will pump traffic
+    
+    //we don't need to sync anymore because the backend is tracking the time and device sync is no longer needed
+    //synchronize();
     //if(jsonRxBuffer["device"] != deviceID){} //no need to sync on our own event only others...wait maybe we do so everyone has round trip latency...test it...
     //  synchronize()
     //}
@@ -675,7 +700,7 @@ void onConnectionEstablished(){
   jsonTxBuffer["userName"] = deviceName;
   jsonTxBuffer["ipaddr"] = WiFi.localIP();
   jsonTxBuffer["FW_Ver"] = FW_Version;
-  jsonTxBuffer["HW_Ver"] = HW_Version;
+  jsonTxBuffer["HW_Ver"] = verHW;
   sendJSON(jsonTxBuffer, deviceChannel); 
 
   // Publish a message to "mytopic/test"

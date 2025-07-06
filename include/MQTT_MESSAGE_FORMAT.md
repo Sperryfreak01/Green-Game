@@ -1,5 +1,7 @@
 # MQTT Message Format Specification
 
+# MQTT Message Format Specification
+
 This document defines the MQTT message formats used by the Green Game (Funger) IoT devices based on the `receiveEvents()` function in `GreenGame.cpp`.
 
 ## Message Overview
