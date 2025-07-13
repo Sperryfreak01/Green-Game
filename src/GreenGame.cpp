@@ -156,7 +156,7 @@ void setup()
     );
 
     // Optional functionalities of EspMQTTClient
-    // client->enableDebuggingMessages(); // Enable debugging messages sent to serial output
+    client->enableDebuggingMessages(); // Enable debugging messages sent to serial output
     // Prepare the Last Will and Testament (LWT) message globally
     client->enableLastWillMessage(deviceChannel, lwtMsg);
     client->setKeepAlive(15); // Set the keep alive interval in seconds, default is 15 seconds
@@ -183,9 +183,6 @@ void setup()
       delay(1); // Small delay to allow for smoother transitions
       int b = interpolate(255, 64, forward ? easedT : 1.0 - easedT);
       setLEDColors(0, b, 0, 0);
-      //setLEDColors(0, 255, 0, 0); // Set the color to blue -> not connected to WiFi
-      //display(colors);
-
     }
     startTime = 0; // Reset start time after connection
     sendLog("Connected to WiFi: " + ssid, INFO);
@@ -231,8 +228,10 @@ void setup()
  *
  * Uses helper functions for color interpolation, easing, and LED color setting.
  */
+
 void loop()
-{  // If in provisioning mode, handle incoming HTTP clients
+{  
+  // If in provisioning mode, handle incoming HTTP clients
   if (WiFi.getMode() == WIFI_AP) {
     dnsServer.processNextRequest();  // handle captive-portal DNS
     server.handleClient();
@@ -248,7 +247,7 @@ void loop()
 
     float t = (float)elapsed / TRANSITION_DURATION;
     float easedT = cubicEaseInOut(t);
-    delay(1); // Small delay to allow for smoother transitions
+    // Remove delay(1) for faster MQTT processing in provisioning mode
     // Interpolate between blue (0, 0, 255) and yellow (255, 255, 0)
     int r = interpolate(0, 255, forward ? easedT : 1.0 - easedT);
     int g = interpolate(0, 200, forward ? easedT : 1.0 - easedT);
@@ -259,105 +258,37 @@ void loop()
   // If not in provisioning mode, handle normal operation
   else if (WiFi.getMode() == WIFI_STA || WiFi.getMode() == WIFI_AP_STA) {
     //Serial.println("Normal operation mode");
-    client->loop(); //Wifi keep alive
-    
+    // MQTT loop already called at start of main loop
     if (client->isMqttConnected()){
-      
+      client->loop(); // Call MQTT loop as early as possible
+
       if (touchBtn.pressed) { //TODO #4 add support for press and hold events to trigger clearing of Wifi settings
         deltaTime = touchBtn.touchTime - syncTime;
         if (deltaTime >= debouceTime){
           sendLog(String("touch Event at delta of: " + String(touchBtn.delta)), DEBUG);
-          //set the color to green, this is the color we transition to when a touch event is detected
-          //TODO #3 make the color transition to green when a touch event is detected
-          hsi2rgbw(109, 63, 98); // Convert HSI to RGBW for green
-
+          
           // Publish the events for other devices to see
           StaticJsonDocument<200> jsonTxBuffer;
           jsonTxBuffer["event"] = "touch";
           jsonTxBuffer["device"] = deviceID; 
-          jsonTxBuffer["delta"] = touchBtn.delta;
           jsonTxBuffer["time"] =  getCurrentTimeMillis(); //send the timestamp of the touch event
-          jsonTxBuffer["H"] =  playerH; //send the timestamp of the touch event
-          jsonTxBuffer["S"] =  playerS; //send the timestamp of the touch event
-          jsonTxBuffer["V"] =  playerV; //send the timestamp of the touch event
-          jsonTxBuffer["position"] = playerPosition; //send the player position
           sendJSON(jsonTxBuffer, "funger/events/"); 
-          sendJSON(jsonTxBuffer, deviceChannel); //send the touch event to the device channel
+
+          touchBtn.pressed = false;
+          syncTime = millis();
         }
-        playerPosition = FIRST; //set the player position to first when a touch event is detected
-        touchBtn.pressed = false;
-        sendDeviceStatus();
       }
-
-      else if (event.newEvent) {
-        //deltaTime = event.eventTime - syncTime;
-        if (event.time > 0){
-          unsigned long long localTime = getCurrentTimeMillis();
-          sendLog("our time is : " + String(localTime) + "Thier time is: " + String(event.time), DEBUG);
-          long long delta = localTime - event.time;
-          sendLog("timestamp delta is: " + String(delta), DEBUG);
-        }
-        sendLog("Delta between touch and sync: " + String(touchBtn.touchTime - syncTime), VERBOSE);
-        sendLog("opponent position is "+ String(event.position), DEBUG);
-        if (event.eventTime < (touchBtn.touchTime - syncTime) && event.position != FIRST){
-          sendLog(String("they win\n Event occured at: " + String(event.eventTime) + "\n Last touch Event at: " + String(touchBtn.delta)), DEBUG);
-          if (playerPosition == OTHER){
-            sendLog("Player position was other, setting to ENTICE", INFO);
-            playerPosition = ENTICE; //set the player position to last when a touch event is detected
-            if (enticementCount < 64){
-              enticementCount +=6; //increment the enticement count by 6
-            }
-          } else if (playerPosition == SECOND){
-            sendLog("Player position was second, setting to third/other", INFO);
-            playerPosition = OTHER; //set the player position to first when a touch event is detected
-          } else if (playerPosition == FIRST){
-            sendLog("Player position was first, setting to second", INFO);
-            playerPosition = SECOND; //set the player position to last when a touch event is detected
-          }  
-
-          //the event happened sooner than our last touch event, filters out delayed messages?? thats what I am telling myself.
-          //set the color to red and sync the time
-          //setLEDColors(0, 0, 0, 255); 
-
-          StaticJsonDocument<200> jsonTxBuffer;
-          jsonTxBuffer["event"] = "sync";
-          jsonTxBuffer["device"] = deviceID; 
-          sendJSON(jsonTxBuffer, "funger/events/");
-        }
-        else if (event.eventTime >= (touchBtn.touchTime - syncTime)){
-          sendLog(String("they lose\n Event occured at: " + String(event.eventTime) + "\n Last touch Event at: " + String(touchBtn.delta)), DEBUG);
-          sendLog("Player position was " + String(playerPosition) + ", setting to first", INFO);
-          playerPosition = FIRST; //set the player position to first when a touch event is detecte
-
-          StaticJsonDocument<200> jsonTxBuffer;
-          jsonTxBuffer["event"] = "sync";
-          jsonTxBuffer["device"] = deviceID; 
-          sendJSON(jsonTxBuffer, "funger/events/");
-        }
-
-        display(colors);
-        event.newEvent = false;    
-      }
-      
       else{ //primary color display loop
-
+        client->loop(); // Call MQTT loop as early as possible
         if (playerPosition == FIRST){
           //set the color to green, this is the color we transition to when a touch event is detected
           hsi2rgbw(109, 63, 98); // Convert HSI to RGBW for green
-          //setLEDColors(0, 0, 255, 0); // Set the color to green when in first place
-          delay(1); // Small delay to allow for smoother transitions
+          // Remove delay(1) for faster MQTT processing
         }
         else if (playerPosition == SECOND){
-          //set the color to yellow, this is the color we transition to when a touch event is detected
-          hsi2rgbw(event.H, event.S, event.I);
-          //sendLog("Setting LED color to oponents color with HSI: " + String(event.H) + ", " + String(event.S) + ", " + String(event.I), DEBUG);
-          //setLEDColors(255, 0, 200, 0); // Set the color to yellow when in second place
-          delay(1); // Small delay to allow for smoother transitions
+          hsi2rgbw(colors.Hue, colors.Sat, colors.Bright);
         }
         else if (playerPosition == OTHER){
-          //setLEDColors(0, 0, 0, 255); // Set the color to white when in third place
-          //delay(1); // Small delay to allow for smoother transitions
-          /**/
             unsigned long elapsed = millis() - startTime;
             bool transitionComplete = false;
 
@@ -390,8 +321,6 @@ void loop()
             float t = (float)elapsed / 1000;
             float easedT = cubicEaseInOut(t);
 
-            //int v = interpolate(100, 0, forward ? easedT : 1.0 - easedT);
-            //hsi2rgbw(109, 0, v); // Convert HSI to RGBW for green
             int w = interpolate(255, 0, forward ? easedT : 1.0 - easedT);
             setLEDColors(0, 0, 0, w); 
             delay(1); // Small delay to allow for smoother transitions
@@ -401,50 +330,17 @@ void loop()
               whiteTransitionValue = w;
             }
         }
-      //TODO #16 when in last place make it breathe white
-      //setLEDColors(0,0,0,255); // Set the color to white when connected to MQTT
-      //display(colors);
-      //display(colors); //TODO putting this here so we can have a progressive fade/blink/refresh in the future
-      //delay(10); // If we are connected to MQTT, just wait a bit
     }
     }
   
     else if(!client->isMqttConnected()){
-      //Show magenta anytime the MQTT connection has died
-      //TODO Change offline indicator to breatheing
-      unsigned long elapsed = millis() - startTime;
-      // Loop the transition
-      if (elapsed > 1000) {
-        startTime = millis();
-        forward = !forward; // alternate direction
-        //return;
-      }
+      // Show magenta anytime the MQTT connection has died
+      setLEDColors(128, 128, 0, 32); 
+      client->loop(); // Call MQTT loop as early as possible
+      sendLog("MQTT not connected, showing magenta", DEBUG);
 
-      float t = (float)elapsed / 1000;
-      float easedT = cubicEaseInOut(t);
-
-      // Interpolate between magenta (255, 0, 255) and dim magenta (127, 0, 127)
-      int r = interpolate(255, 127, forward ? easedT : 1.0 - easedT);
-      int g = interpolate(0, 200, forward ? easedT : 1.0 - easedT);
-      int b = interpolate(255, 127, forward ? easedT : 1.0 - easedT);
-      setLEDColors(r, b, g, 0); 
-      delay(1); // Small delay to allow for smoother transitions
-      //setLEDColors(128, 128, 0, 0); 
     }
   }
-}
-
-void sendDeviceStatus() {
-  StaticJsonDocument<200> jsonTxBuffer;
-  jsonTxBuffer["event"] = "status";
-  jsonTxBuffer["device"] = deviceID; 
-  jsonTxBuffer["H"] = playerH;
-  jsonTxBuffer["S"] = playerS;
-  jsonTxBuffer["V"] = playerV;
-  jsonTxBuffer["position"] = playerPosition; //send the player position
-  jsonTxBuffer["time"] = getCurrentTimeMillis(); //send the timestamp of the touch event
-  //sendJSON(jsonTxBuffer, "funger/events/"); 
-  sendJSON(jsonTxBuffer, (String(deviceChannel) + deviceID).c_str()); //send the status event to the device channel
 }
 
 void IRAM_ATTR touchEvent(){
@@ -495,6 +391,9 @@ unsigned long long getCurrentTimeMillis() {
 }
 
 void recieveEvents(const String& msg){
+  unsigned long eventReceiveTime = millis();
+  sendLog("MQTT event received at: " + String(eventReceiveTime), DEBUG);
+
   /*event types:
     0: No Event/Unknown
     FF: other event
@@ -504,10 +403,53 @@ void recieveEvents(const String& msg){
     TODO 5: Disable touch events via MQTT
     TODO 6: factory reset
   */
-  StaticJsonDocument<300> jsonRxBuffer;
+  StaticJsonDocument<200> jsonRxBuffer;
   DeserializationError error = deserializeJson(jsonRxBuffer, msg);
+
   if (error){
     sendLog("event did not contain JSON: " + msg);
+  }
+  else if(jsonRxBuffer["event"] == "state_update"){
+    unsigned long stateUpdateTime = millis();
+    sendLog("MQTT state update received at: " + String(stateUpdateTime), DEBUG);
+    if (strcmp(jsonRxBuffer["first_place_device"], deviceID) == 0 && playerPosition != FIRST) {
+      // This device is in first place
+      playerPosition = FIRST;
+      sendLog("We are in first place via server", DEBUG);
+    }
+    else if (strcmp(jsonRxBuffer["second_place_device"], deviceID) == 0 ) {
+      uint16_t temp; 
+      playerPosition = SECOND;
+      sendLog("We are in second place via server", DEBUG);
+
+      temp = jsonRxBuffer["second_place_H"];
+      if (temp) {
+        colors.Hue = temp;
+        sendLog("Setting second place color H to: " + String(colors.Hue), VERBOSE);
+      }
+      temp = jsonRxBuffer["second_place_S"];
+      if (temp) {
+        colors.Sat = temp;
+        sendLog("Setting second place color S to: " + String(colors.Sat), VERBOSE);
+      }
+      temp = jsonRxBuffer["second_place_V"];
+      if (temp) {
+        colors.Bright = temp;
+        sendLog("Setting second place color V to: " + String(colors.Bright), VERBOSE);
+      }
+      sendLog("Setting second place colors to H: " + String(colors.Hue) + ", S: " + String(colors.Sat) + ", V: " + String(colors.Bright), VERBOSE);
+    }
+    else {
+      if (playerPosition == OTHER){
+          sendLog("Player position was other, setting to ENTICE", INFO);
+          playerPosition = ENTICE; //set the player position to last when a touch event is detected
+          if (enticementCount < 64){
+            enticementCount +=6; //increment the enticement count by 6
+          }
+      } else {
+        playerPosition = OTHER; //set the player position to other when a touch event is detected
+      }
+    }
   }
   else if(jsonRxBuffer["event"] == "OTA"){
     handleOTAEvent(jsonRxBuffer);
@@ -518,7 +460,7 @@ void recieveEvents(const String& msg){
   else if(jsonRxBuffer["event"] == "reboot"){
     sendLog("rebooting device", INFO);
     ESP.restart(); //reboot the device
-  }
+  }  
   else if(jsonRxBuffer["event"] == "display"){
     if (jsonRxBuffer.containsKey("maxBrightness")) {
       colors.maxBrightness = jsonRxBuffer["maxBrightness"].as<u_int8_t>();
@@ -567,11 +509,12 @@ void recieveEvents(const String& msg){
     }
   }
   else if(jsonRxBuffer["event"] == "touch"){
+    /*
     //Serial.println(msg);
     sendLog("got MQTT touch event");
-    serializeJson(jsonRxBuffer, Serial);
+    //serializeJson(jsonRxBuffer, Serial);
     if (jsonRxBuffer["device"] != deviceID){
-      event.newEvent = true;
+      //event.newEvent = true;
       event.eventTime = jsonRxBuffer["delta"];
       event.deviceID = jsonRxBuffer["device"];
       event.H = jsonRxBuffer["H"].as<u_int16_t>();
@@ -585,6 +528,7 @@ void recieveEvents(const String& msg){
     else{
       sendLog("this was our event",DEBUG);
     }
+    */
     return;      
   }
   else if(jsonRxBuffer["event"] == "sync"){ //someone just  processed a wining event - everyone clear thier timers to sync up
