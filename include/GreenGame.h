@@ -1,4 +1,3 @@
-
 #include <Arduino.h>
 #include "EspMQTTClient.h"
 #include "esp_system.h"
@@ -14,6 +13,9 @@
 #include <DNSServer.h>
 #include <vector>
 #include <algorithm>
+#include "math.h"
+#include "SharedTypes.h"  // Include shared types
+#include "OTAManager.h"  // Include OTA module
 
 
 // Global constants and variables
@@ -33,9 +35,10 @@
 #define EVENT_OTA 4
 #define EVENT_TOUCH 6
 
-#define FIRST 1;
-#define SECOND 2;
-#define OTHER 3;
+#define FIRST 1
+#define SECOND 2
+#define OTHER 3
+#define ENTICE 4
 
 #define logLevelSerial  DEBUG // Set the default log level
 #define logLevelMQTT  INFO // Set the default MQTT log level
@@ -46,11 +49,17 @@
 #define  whiteLEDs 3
 #define Logging "remote"
 
+
+#define DEG_TO_RAD(X) (M_PI*(X)/180)
+
 const int REDPIN = 16;
 const int GREENPIN = 32;//17
 const int BLUEPIN = 17;//21;
 const int WHITEPIN = 21;//32;
-
+const int HW_ADC_LOW = 23; // GND side of HW ADC voltage devider
+const int HW_ADC_HIGH = 34; // Minimum ADC value for hardware
+const int HW_ADC = 33; // ADC pin for hardware version detectionc
+uint8_t verHW = 0; // Hardware version, set in setup() based on ADC reading
 
 //Time related variables
 unsigned long startMillis;  
@@ -62,6 +71,19 @@ uint8_t debouceTime = 50;
 
 String options = "";
 
+int playerPosition = 3; // Player position in the game
+int opponentPosition = 3; // Opponent position in the game
+uint8_t enticementCount = 0; 
+uint8_t whiteTransitionValue = 0;
+uint16_t playerH = 38; 
+uint16_t playerS = 63; 
+uint16_t playerV = 98;
+
+uint8_t opponentrH; 
+uint8_t opponentS; 
+uint8_t opponentV; // Opponent's color values
+
+char lwtMsg[128]; // Last Will and Testament message for MQTT
 
 //Device ID stuff
 uint32_t macLow;
@@ -78,8 +100,9 @@ const char* ntpServer = "pool.ntp.org";
 const long gmtOffset_sec = -28800; // Adjust for your timezone, e.g., PST (UTC-8)
 // Daylight offset in seconds (e.g., for daylight saving time: 3600)
 const int daylightOffset_sec = -25200; // Adjust for your timezone, e.g., -25200 for PDT (UTC-7)
-unsigned long bootTimeMillis;
-
+unsigned long long bootEpochMillis;
+unsigned long bootMillis;
+time_t bootEpoch;
 //static 
 
 //===================================== Structure Def ============================================
@@ -90,21 +113,16 @@ struct Button {
   volatile bool pressed = false;
 };
 
-struct LEDstruct {
-  uint8_t redBrightness = 0;
-  uint8_t greenBrightness = 0;
-  uint8_t blueBrightness = 0;
-  uint8_t whiteBrightness = 0;
-  uint8_t maxBrightness = 100; // Max brightness percentage (0-100) 
-  uint8_t nightBrightness = 100; // Night mode brightness percentage (0-100)
-  uint8_t nightEnd = 7; // Hour when night mode ends (0-23)
-  uint8_t nightStart = 20; // Hour when night mode starts (0-
-};
-
 struct Event {
   bool newEvent = false;
   unsigned long eventTime = 0;
   uint64_t deviceID = 0;
+  uint16_t H = 0; // Hue value for color
+  uint16_t S = 0; // Saturation value for color
+  uint16_t I = 0; // Intensity value for color
+  u8_t position = OTHER; // Type of event (e.g., button press, MQTT message)
+  unsigned long long time = 0; // Timestamp in milliseconds since epoch
+
 };
 
 struct NetworkInfo {
@@ -116,7 +134,6 @@ struct tm timeinfo;
 
 //=================================== End Structure Def ==========================================
 
-HTTPClient OTAclient;
 EspMQTTClient* client;
 WebServer server(80);
 DNSServer dnsServer; // DNS server for captive portal
@@ -142,17 +159,16 @@ char MQTTp[] = MQTT_PASSWORD;
 char mqttuser[] = "green1green1green1"; 
 char deviceID[18];
 char deviceChannel[40];    
-char FW_Version[] = "1.0.6";
+char FW_Version[] = "1.1.0";
 char HW_Version[]  = "1";
 
 void IRAM_ATTR touchEvent(void);
 void display(struct LEDstruct);
 void setLEDColors(uint8_t, uint8_t, uint8_t, uint8_t);
 void sendJSON(const JsonDocument&, const char*);
-bool fetchOTA(const String& HOST, bool persist = true);
 void syncNTP();
 void colorBars();
-void calcCurrentTimeMillis();
+void calcBootEpochMillis();
 void printCurrentTimeMillis();
 void removeColons(char*);
 void startProvisioningAP();
@@ -166,6 +182,10 @@ void factoryReset();
 void sendLog(const String& log, int msgLevel = INFO);
 String getMacAddress();
 std::vector<NetworkInfo> scanNetworks();
+unsigned long long getCurrentTimeMillis();
+void hsi2rgbw(float H, float S, float I);
+uint8_t getHWversion();
+void sendDeviceStatus();
 
 // HTML page served for Wi-Fi provisioning
 
